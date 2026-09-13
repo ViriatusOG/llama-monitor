@@ -107,8 +107,8 @@ async function loadGpuEnv() {
         const infoEl = document.getElementById('gpu-detected-info');
         const summaryInfo = document.getElementById('gpu-env-info');
         if (detected) {
-            infoEl.textContent = 'Detected: ' + detected.count + 'x ' + detected.arch + ' (' + detected.names.join(', ') + ')';
-            summaryInfo.textContent = '\u2014 ' + detected.count + 'x ' + detected.arch;
+            infoEl.textContent = 'Detected: ' + detected.count + ' GPU(s): ' + detected.names.join(', ');
+            summaryInfo.textContent = '\u2014 ' + detected.count + ' GPU(s) detected';
         } else {
             infoEl.textContent = 'No GPU detected via rocminfo/nvidia-smi';
             summaryInfo.textContent = '';

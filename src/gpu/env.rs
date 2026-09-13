@@ -74,8 +74,13 @@ pub const GPU_ARCHITECTURES: &[GpuArch] = &[
     },
     GpuArch {
         id: "gfx1200",
-        name: "gfx1200 (RX 9070 XT)",
+        name: "gfx1200 (RX 9060 XT)",
         hsa_version: "12.0.0",
+    },
+    GpuArch {
+        id: "gfx1201",
+        name: "gfx1201 (RX 9070/9070 XT/9070 GRE)",
+        hsa_version: "12.0.1",
     },
 ];
 
@@ -168,21 +173,38 @@ pub fn detect_rocm_gpus() -> Option<DetectedGpu> {
 
 pub fn parse_rocminfo(output: &str) -> Option<DetectedGpu> {
     // GPU agents have Name: gfxNNN, CPU agents have Name: AMD EPYC / Intel etc.
-    // Just find all Name: lines with a gfx prefix.
+    // Each GPU agent is usually followed by a "Marketing Name:" line with the
+    // human-readable product name (e.g. "AMD Radeon RX 9070 XT"). Prefer that
+    // for display, falling back to the raw gfx id when it's absent (older
+    // rocminfo output, or test fixtures without a Marketing Name line).
     let mut arch = String::new();
     let mut names = Vec::new();
+    let mut pending_name: Option<String> = None;
 
     for line in output.lines() {
         let trimmed = line.trim();
         if let Some(name_val) = trimmed.strip_prefix("Name:") {
+            if let Some(n) = pending_name.take() {
+                names.push(n);
+            }
             let name = name_val.trim().to_string();
             if name.starts_with("gfx") {
                 if arch.is_empty() {
                     arch = name.clone();
                 }
-                names.push(name);
+                pending_name = Some(name);
+            }
+        } else if pending_name.is_some() {
+            if let Some(marketing) = trimmed.strip_prefix("Marketing Name:") {
+                let marketing = marketing.trim();
+                if !marketing.is_empty() {
+                    pending_name = Some(marketing.to_string());
+                }
             }
         }
+    }
+    if let Some(n) = pending_name.take() {
+        names.push(n);
     }
 
     if names.is_empty() {
@@ -229,7 +251,18 @@ pub fn detect_nvidia_gpus() -> Option<DetectedGpu> {
 
 /// Detect GPUs (try ROCm first, then NVIDIA).
 pub fn detect_gpus() -> Option<DetectedGpu> {
-    detect_rocm_gpus().or_else(detect_nvidia_gpus)
+    let rocm = detect_rocm_gpus();
+    let nvidia = detect_nvidia_gpus();
+    match (rocm, nvidia) {
+        (Some(mut r), Some(n)) => {
+            r.count += n.count;
+            r.names.extend(n.names);
+            Some(r)
+        }
+        (Some(r), None) => Some(r),
+        (None, Some(n)) => Some(n),
+        (None, None) => None,
+    }
 }
 
 /// Generate a device list string like "0,1,2,3" for N devices.
