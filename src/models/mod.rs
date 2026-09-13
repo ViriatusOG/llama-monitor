@@ -1,3 +1,5 @@
+pub mod hf;
+
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -10,6 +12,10 @@ pub struct DiscoveredModel {
     pub quant_type: Option<String>,
     pub model_name: Option<String>,
     pub is_split: bool,
+    pub hf_repo: Option<String>,
+    pub downloaded_at: Option<u64>,
+    pub hf_downloads: Option<u64>,
+    pub hf_last_modified: Option<String>,
 }
 
 /// Scan a directory for .gguf model files.
@@ -42,6 +48,8 @@ pub fn scan_models_dir(dir: &Path) -> Result<Vec<DiscoveredModel>> {
         let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
         let (model_name, quant_type) = parse_gguf_filename(&filename);
 
+        let meta = read_model_metadata(dir, &filename);
+
         models.push(DiscoveredModel {
             path: path.clone(),
             filename,
@@ -50,6 +58,10 @@ pub fn scan_models_dir(dir: &Path) -> Result<Vec<DiscoveredModel>> {
             quant_type,
             model_name,
             is_split,
+            hf_repo: meta.as_ref().map(|m| m.repo.clone()),
+            downloaded_at: meta.as_ref().map(|m| m.downloaded_at),
+            hf_downloads: meta.as_ref().and_then(|m| m.hf_downloads),
+            hf_last_modified: meta.as_ref().and_then(|m| m.hf_last_modified.clone()),
         });
     }
 
@@ -73,19 +85,19 @@ pub fn parse_gguf_filename(filename: &str) -> (Option<String>, Option<String>) {
     // Common patterns: Q4_0, Q4_1, Q8_0, Q4_K_M, Q4_K_XL, Q2_K_XL, UD-Q8_K_XL
     // Look for the last occurrence of a quant pattern
     let quant_patterns = [
-        "-UD-Q", "-Q", "_Q", // with separator
+        "-UD-Q", "-UD-IQ", "-Q", "-IQ", "_Q", "_IQ", // with separator
     ];
 
     for pattern in &quant_patterns {
         if let Some(pos) = stem.rfind(pattern) {
-            let sep_len = pattern.len() - 1; // length of separator before Q
-            let quant_start = pos + 1 + sep_len; // skip separator, include Q
+            let sep_len = pattern.len() - 1; // length of separator before Q/IQ
+            let quant_start = pos + 1 + sep_len; // skip separator, include Q/IQ
             let model_name = &stem[..pos];
             let quant_str = if pattern.starts_with("-UD-") {
                 // Include "UD-" prefix in quant type
                 &stem[pos + 1..]
             } else {
-                &stem[quant_start - 1..] // include the Q
+                &stem[quant_start - pattern.trim_start_matches('-').trim_start_matches('_').len()..]
             };
 
             if !model_name.is_empty() && quant_str.len() >= 3 {
@@ -137,6 +149,12 @@ fn strip_split_suffix(stem: &str) -> &str {
     stem
 }
 
+fn read_model_metadata(dir: &Path, filename: &str) -> Option<crate::models::hf::ModelMetadata> {
+    let meta_path = dir.join(format!("{filename}.meta.json"));
+    let contents = std::fs::read_to_string(meta_path).ok()?;
+    serde_json::from_str(&contents).ok()
+}
+
 fn format_size(bytes: u64) -> String {
     if bytes >= 1_073_741_824 {
         format!("{:.1} GB", bytes as f64 / 1_073_741_824.0)
@@ -177,6 +195,13 @@ mod tests {
         let (name, quant) = parse_gguf_filename("Qwen3.5-122B-A10B-UD-Q2_K_XL.gguf");
         assert_eq!(name.as_deref(), Some("Qwen3.5-122B-A10B"));
         assert_eq!(quant.as_deref(), Some("UD-Q2_K_XL"));
+    }
+
+    #[test]
+    fn test_parse_iq_quant() {
+        let (name, quant) = parse_gguf_filename("Gemma-4-E4B-Uncensored-HauhauCS-Aggressive-IQ3_M.gguf");
+        assert_eq!(name.as_deref(), Some("Gemma-4-E4B-Uncensored-HauhauCS-Aggressive"));
+        assert_eq!(quant.as_deref(), Some("IQ3_M"));
     }
 
     #[test]

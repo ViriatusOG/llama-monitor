@@ -28,11 +28,13 @@ pub fn ws_route(
                             let logs: Vec<String> =
                                 state.server_logs.lock().unwrap().iter().cloned().collect();
                             let running = *state.server_running.lock().unwrap();
+                            let hf_download = state.hf_download_progress.lock().unwrap().clone();
                             serde_json::json!({
                                 "gpu": gpu,
                                 "llama": llama,
                                 "logs": logs,
                                 "server_running": running,
+                                "hf_download": hf_download,
                             })
                             .to_string()
                         };

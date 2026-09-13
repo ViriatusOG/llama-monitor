@@ -64,17 +64,25 @@ async fn main() -> Result<()> {
     // Load UI settings from disk (or defaults)
     let ui_settings = state::load_ui_settings(&app_config.ui_settings_file);
 
+    // UI-configured models directory takes precedence over the CLI default,
+    // matching the same precedence already used for server path/cwd.
+    let models_dir = if !ui_settings.models_dir.is_empty() {
+        Some(std::path::PathBuf::from(&ui_settings.models_dir))
+    } else {
+        app_config.models_dir.clone()
+    };
+
     let state = state::AppState::new(
         initial_presets,
         app_config.presets_file.clone(),
-        app_config.models_dir.clone(),
+        models_dir.clone(),
         gpu_env,
         app_config.gpu_env_file.clone(),
         ui_settings,
         app_config.ui_settings_file.clone(),
     );
 
-    if let Some(ref dir) = app_config.models_dir {
+    if let Some(ref dir) = models_dir {
         let count = state.discovered_models.lock().unwrap().len();
         println!("[info] Discovered {count} models in {}", dir.display());
     }

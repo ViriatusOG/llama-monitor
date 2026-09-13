@@ -7,6 +7,7 @@ use crate::gpu::env::GpuEnv;
 use crate::llama::metrics::LlamaMetrics;
 use crate::llama::server::ServerConfig;
 use crate::models::DiscoveredModel;
+use crate::models::hf::SharedDownloadProgress;
 use crate::presets::ModelPreset;
 
 const MAX_LOG_LINES: usize = 500;
@@ -75,11 +76,12 @@ pub struct AppState {
     pub presets: Arc<Mutex<Vec<ModelPreset>>>,
     pub presets_path: PathBuf,
     pub discovered_models: Arc<Mutex<Vec<DiscoveredModel>>>,
-    pub models_dir: Option<PathBuf>,
+    pub models_dir: Arc<Mutex<Option<PathBuf>>>,
     pub gpu_env: Arc<Mutex<GpuEnv>>,
     pub gpu_env_path: PathBuf,
     pub ui_settings: Arc<Mutex<UiSettings>>,
     pub ui_settings_path: PathBuf,
+    pub hf_download_progress: SharedDownloadProgress,
 }
 
 impl AppState {
@@ -108,11 +110,12 @@ impl AppState {
             presets: Arc::new(Mutex::new(presets)),
             presets_path,
             discovered_models: Arc::new(Mutex::new(discovered)),
-            models_dir,
+            models_dir: Arc::new(Mutex::new(models_dir)),
             gpu_env: Arc::new(Mutex::new(gpu_env)),
             gpu_env_path,
             ui_settings: Arc::new(Mutex::new(ui_settings)),
             ui_settings_path,
+            hf_download_progress: Arc::new(Mutex::new(None)),
         }
     }
 

@@ -6,6 +6,7 @@ use crate::config::AppConfig;
 use crate::gpu::env::{self as gpu_env, GPU_ARCHITECTURES, GpuEnv};
 use crate::llama::server::{self, ServerConfig};
 use crate::models;
+use crate::models::hf;
 use crate::presets::{self, ModelPreset};
 use crate::state::{self as app_state, AppState, UiSettings};
 
@@ -22,11 +23,15 @@ pub fn api_routes(
     let reset_presets = api_reset_presets(state.clone());
     let get_models = api_get_models(state.clone());
     let refresh_models = api_refresh_models(state.clone());
+    let delete_model = api_delete_model(state.clone());
     let get_gpu_env = api_get_gpu_env(state.clone());
     let put_gpu_env = api_put_gpu_env(state.clone());
     let get_settings = api_get_settings(state.clone());
     let put_settings = api_put_settings(state.clone());
     let browse = api_browse();
+    let hf_search = api_hf_search();
+    let hf_files = api_hf_files();
+    let hf_download = api_hf_download(state.clone());
     let chat = api_chat(state);
 
     start
@@ -38,11 +43,15 @@ pub fn api_routes(
         .or(get_presets)
         .or(get_models)
         .or(refresh_models)
+        .or(delete_model)
         .or(put_gpu_env)
         .or(get_gpu_env)
         .or(put_settings)
         .or(get_settings)
         .or(browse)
+        .or(hf_search)
+        .or(hf_files)
+        .or(hf_download)
         .or(chat)
 }
 
@@ -188,8 +197,9 @@ fn api_refresh_models(
     warp::path!("api" / "models" / "refresh")
         .and(warp::post())
         .map(move || {
-            if let Some(ref dir) = state.models_dir {
-                match models::scan_models_dir(dir) {
+            let dir_opt = state.models_dir.lock().unwrap().clone();
+            if let Some(dir) = dir_opt {
+                match models::scan_models_dir(&dir) {
                     Ok(discovered) => {
                         let count = discovered.len();
                         *state.discovered_models.lock().unwrap() = discovered;
@@ -264,12 +274,13 @@ fn api_put_settings(
             let _ = app_state::save_ui_settings(&state.ui_settings_path, &settings);
             drop(settings);
 
-            // Rescan models if models_dir changed
-            if new_dir != old_dir
-                && !new_dir.is_empty()
-                && let Ok(discovered) = crate::models::scan_models_dir(&PathBuf::from(&new_dir))
-            {
-                *state.discovered_models.lock().unwrap() = discovered;
+            // Rescan models and update the live models_dir if it changed
+            if new_dir != old_dir && !new_dir.is_empty() {
+                let new_path = PathBuf::from(&new_dir);
+                if let Ok(discovered) = crate::models::scan_models_dir(&new_path) {
+                    *state.discovered_models.lock().unwrap() = discovered;
+                }
+                *state.models_dir.lock().unwrap() = Some(new_path);
             }
 
             warp::reply::json(&serde_json::json!({"ok": true}))
@@ -459,4 +470,156 @@ fn api_chat(
                 }
             },
         )
+}
+
+fn api_hf_search() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "search")
+        .and(warp::get())
+        .and(warp::query::<std::collections::HashMap<String, String>>())
+        .and_then(|query: std::collections::HashMap<String, String>| async move {
+            let q = query.get("q").cloned().unwrap_or_default();
+            if q.trim().is_empty() {
+                return Ok::<_, warp::Rejection>(warp::reply::json(
+                    &serde_json::json!({"results": []}),
+                ));
+            }
+            match hf::search_hf_models(&q).await {
+                Ok(results) => Ok(warp::reply::json(&serde_json::json!({"results": results}))),
+                Err(e) => Ok(warp::reply::json(&serde_json::json!({"error": e.to_string()}))),
+            }
+        })
+}
+
+fn api_hf_files() -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "files")
+        .and(warp::get())
+        .and(warp::query::<std::collections::HashMap<String, String>>())
+        .and_then(|query: std::collections::HashMap<String, String>| async move {
+            let repo = query.get("repo").cloned().unwrap_or_default();
+            if repo.trim().is_empty() {
+                return Ok::<_, warp::Rejection>(warp::reply::json(
+                    &serde_json::json!({"error": "missing repo"}),
+                ));
+            }
+            match hf::list_hf_gguf_files(&repo).await {
+                Ok(files) => Ok(warp::reply::json(&serde_json::json!({"files": files}))),
+                Err(e) => Ok(warp::reply::json(&serde_json::json!({"error": e.to_string()}))),
+            }
+        })
+}
+
+fn api_hf_download(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "hf" / "download")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(warp::any().map(move || state.clone()))
+        .and_then(
+            |body: serde_json::Value, state: AppState| async move {
+                let repo = body
+                    .get("repo")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let filename = body
+                    .get("filename")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if repo.is_empty() || filename.is_empty() {
+                    return Ok::<_, warp::Rejection>(warp::reply::json(&serde_json::json!({
+                        "ok": false,
+                        "error": "repo and filename required"
+                    })));
+                }
+                let dest_dir = match state.models_dir.lock().unwrap().clone() {
+                    Some(d) => d,
+                    None => {
+                        return Ok(warp::reply::json(&serde_json::json!({
+                            "ok": false,
+                            "error": "models directory not configured"
+                        })));
+                    }
+                };
+                let progress = state.hf_download_progress.clone();
+                let models_dir_state = state.models_dir.clone();
+                let discovered_models = state.discovered_models.clone();
+                tokio::spawn(async move {
+                    hf::download_hf_file(repo, filename, dest_dir, progress).await;
+                    let dir_opt = models_dir_state.lock().unwrap().clone();
+                    if let Some(dir) = dir_opt
+                        && let Ok(discovered) = crate::models::scan_models_dir(&dir)
+                    {
+                        *discovered_models.lock().unwrap() = discovered;
+                    }
+                });
+                Ok(warp::reply::json(&serde_json::json!({"ok": true})))
+            },
+        )
+}
+
+fn api_delete_model(
+    state: AppState,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "models" / "delete")
+        .and(warp::post())
+        .and(warp::body::json())
+        .map(move |body: serde_json::Value| {
+            let filename = body
+                .get("filename")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            // Reject anything that isn't a bare filename -- no path traversal.
+            if filename.is_empty()
+                || filename.contains('/')
+                || filename.contains("..")
+                || !filename.ends_with(".gguf")
+            {
+                return warp::reply::json(&serde_json::json!({
+                    "ok": false,
+                    "error": "invalid filename"
+                }));
+            }
+
+            let dir_opt = state.models_dir.lock().unwrap().clone();
+            let dir = match dir_opt {
+                Some(d) => d,
+                None => {
+                    return warp::reply::json(&serde_json::json!({
+                        "ok": false,
+                        "error": "no models directory configured"
+                    }));
+                }
+            };
+
+            let target = dir.join(&filename);
+            // Re-verify the resolved path is actually inside the models dir.
+            let inside = target
+                .canonicalize()
+                .ok()
+                .and_then(|t| dir.canonicalize().ok().map(|d| t.starts_with(d)))
+                .unwrap_or(false);
+            if !inside {
+                return warp::reply::json(&serde_json::json!({
+                    "ok": false,
+                    "error": "file not found in models directory"
+                }));
+            }
+
+            match std::fs::remove_file(&target) {
+                Ok(()) => {
+                    if let Ok(discovered) = crate::models::scan_models_dir(&dir) {
+                        *state.discovered_models.lock().unwrap() = discovered;
+                    }
+                    warp::reply::json(&serde_json::json!({"ok": true}))
+                }
+                Err(e) => warp::reply::json(&serde_json::json!({
+                    "ok": false,
+                    "error": e.to_string()
+                })),
+            }
+        })
 }
