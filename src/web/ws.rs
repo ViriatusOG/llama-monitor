@@ -29,12 +29,21 @@ pub fn ws_route(
                                 state.server_logs.lock().unwrap().iter().cloned().collect();
                             let running = *state.server_running.lock().unwrap();
                             let hf_download = state.hf_download_progress.lock().unwrap().clone();
+                            let model_path = state
+                                .server_config
+                                .lock()
+                                .unwrap()
+                                .as_ref()
+                                .map(|c| c.model_path.clone());
+                            let bench = state.bench_progress.lock().unwrap().clone();
                             serde_json::json!({
                                 "gpu": gpu,
                                 "llama": llama,
                                 "logs": logs,
                                 "server_running": running,
                                 "hf_download": hf_download,
+                                "model_path": model_path,
+                                "bench": bench,
                             })
                             .to_string()
                         };

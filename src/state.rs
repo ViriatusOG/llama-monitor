@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::gpu::GpuMetrics;
 use crate::gpu::env::GpuEnv;
+use crate::llama::bench::{BenchProgress, SharedBenchProgress};
 use crate::llama::metrics::LlamaMetrics;
 use crate::llama::server::ServerConfig;
 use crate::models::DiscoveredModel;
@@ -82,6 +83,7 @@ pub struct AppState {
     pub ui_settings: Arc<Mutex<UiSettings>>,
     pub ui_settings_path: PathBuf,
     pub hf_download_progress: SharedDownloadProgress,
+    pub bench_progress: SharedBenchProgress,
 }
 
 impl AppState {
@@ -116,6 +118,7 @@ impl AppState {
             ui_settings: Arc::new(Mutex::new(ui_settings)),
             ui_settings_path,
             hf_download_progress: Arc::new(Mutex::new(None)),
+            bench_progress: Arc::new(Mutex::new(BenchProgress::default())),
         }
     }
 

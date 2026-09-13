@@ -4,6 +4,7 @@ use warp::Filter;
 
 use crate::config::AppConfig;
 use crate::gpu::env::{self as gpu_env, GPU_ARCHITECTURES, GpuEnv};
+use crate::llama::bench;
 use crate::llama::server::{self, ServerConfig};
 use crate::models;
 use crate::models::hf;
@@ -14,6 +15,7 @@ pub fn api_routes(
     state: AppState,
     app_config: Arc<AppConfig>,
 ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    let app_config_bench = app_config.clone();
     let start = api_start(state.clone(), app_config);
     let stop = api_stop(state.clone());
     let get_presets = api_get_presets(state.clone());
@@ -24,6 +26,7 @@ pub fn api_routes(
     let get_models = api_get_models(state.clone());
     let refresh_models = api_refresh_models(state.clone());
     let delete_model = api_delete_model(state.clone());
+    let bench_run = api_bench_run(state.clone(), app_config_bench);
     let get_gpu_env = api_get_gpu_env(state.clone());
     let put_gpu_env = api_put_gpu_env(state.clone());
     let get_settings = api_get_settings(state.clone());
@@ -44,6 +47,7 @@ pub fn api_routes(
         .or(get_models)
         .or(refresh_models)
         .or(delete_model)
+        .or(bench_run)
         .or(put_gpu_env)
         .or(get_gpu_env)
         .or(put_settings)
@@ -622,4 +626,88 @@ fn api_delete_model(
                 })),
             }
         })
+}
+
+fn api_bench_run(
+    state: AppState,
+    app_config: Arc<AppConfig>,
+) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
+    warp::path!("api" / "bench" / "run")
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(warp::any().map(move || state.clone()))
+        .and(warp::any().map(move || app_config.clone()))
+        .map(
+            |body: serde_json::Value, state: AppState, app_config: Arc<AppConfig>| {
+                if state.bench_progress.lock().unwrap().running {
+                    return warp::reply::json(&serde_json::json!({
+                        "ok": false,
+                        "error": "a benchmark is already running"
+                    }));
+                }
+                if *state.server_running.lock().unwrap() {
+                    return warp::reply::json(&serde_json::json!({
+                        "ok": false,
+                        "error": "stop the server before benchmarking -- it needs the GPUs"
+                    }));
+                }
+
+                let model_path = body
+                    .get("model_path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if model_path.is_empty() {
+                    return warp::reply::json(&serde_json::json!({
+                        "ok": false,
+                        "error": "model_path required"
+                    }));
+                }
+
+                let splits: Vec<String> = body
+                    .get("splits")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|s| s.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if splits.is_empty() {
+                    return warp::reply::json(&serde_json::json!({
+                        "ok": false,
+                        "error": "at least one tensor split required"
+                    }));
+                }
+
+                let gpu_layers = body
+                    .get("gpu_layers")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(999) as i32;
+
+                let server_path = {
+                    let ui = state.ui_settings.lock().unwrap();
+                    if ui.llama_server_path.is_empty() {
+                        app_config.llama_server_path.display().to_string()
+                    } else {
+                        ui.llama_server_path.clone()
+                    }
+                };
+                let bench_bin = bench::bench_binary_path(&server_path);
+                if !bench_bin.exists() {
+                    return warp::reply::json(&serde_json::json!({
+                        "ok": false,
+                        "error": format!("llama-bench not found at {}", bench_bin.display())
+                    }));
+                }
+
+                let progress = state.bench_progress.clone();
+                tokio::spawn(async move {
+                    bench::run_benchmark_sweep(bench_bin, model_path, splits, gpu_layers, progress)
+                        .await;
+                });
+
+                warp::reply::json(&serde_json::json!({"ok": true}))
+            },
+        )
 }
