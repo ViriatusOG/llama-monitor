@@ -250,8 +250,56 @@ pub async fn start_server(
         *running = true;
     }
     {
+        let mut err = state.server_error.lock().unwrap();
+        *err = None;
+    }
+    {
         let mut cfg = state.server_config.lock().unwrap();
         *cfg = Some(config);
+    }
+
+    // Watch for the process exiting on its own (e.g. a model that fails
+    // to load). Without this, server_running stays true forever and the
+    // UI keeps showing "Stop" for a server that is no longer there.
+    {
+        let watch_state = state.clone();
+        let started = std::time::Instant::now();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+                let mut guard = watch_state.server_child.lock().await;
+                let exited = match guard.as_mut() {
+                    // No child means stop_server() already cleaned up.
+                    None => break,
+                    Some(child) => match child.try_wait() {
+                        Ok(Some(status)) => Some(status),
+                        Ok(None) => None,
+                        Err(_) => break,
+                    },
+                };
+
+                if let Some(status) = exited {
+                    *guard = None;
+                    drop(guard);
+
+                    *watch_state.server_running.lock().unwrap() = false;
+                    *watch_state.server_config.lock().unwrap() = None;
+
+                    let quick = started.elapsed() < std::time::Duration::from_secs(20);
+                    let msg = if quick {
+                        format!(
+                            "llama-server exited during startup ({status}). Check the Logs tab."
+                        )
+                    } else {
+                        format!("llama-server exited unexpectedly ({status}).")
+                    };
+                    watch_state.push_log(format!("[monitor] {msg}"));
+                    *watch_state.server_error.lock().unwrap() = Some(msg);
+                    break;
+                }
+            }
+        });
     }
 
     // Notify the llama poller to start
@@ -278,6 +326,10 @@ pub async fn stop_server(state: &AppState) -> Result<()> {
     {
         let mut m = state.llama_metrics.lock().unwrap();
         *m = crate::llama::metrics::LlamaMetrics::default();
+    }
+    {
+        let mut err = state.server_error.lock().unwrap();
+        *err = None;
     }
     state.push_log("[monitor] Server stopped.".into());
     Ok(())

@@ -36,6 +36,7 @@ pub fn ws_route(
                                 .as_ref()
                                 .map(|c| c.model_path.clone());
                             let bench = state.bench_progress.lock().unwrap().clone();
+                            let server_error = state.server_error.lock().unwrap().clone();
                             serde_json::json!({
                                 "gpu": gpu,
                                 "llama": llama,
@@ -44,6 +45,7 @@ pub fn ws_route(
                                 "hf_download": hf_download,
                                 "model_path": model_path,
                                 "bench": bench,
+                                "server_error": server_error,
                             })
                             .to_string()
                         };

@@ -251,6 +251,7 @@ function fileBrowserSelect(path) {
 // --- Optimize / Benchmark ---
 
 let benchRunning = false;
+let lastServerError = null;
 
 async function populateBenchModels() {
     const splitsEl = document.getElementById('bench-splits');
@@ -1178,6 +1179,14 @@ ws.onmessage = e => {
     serverRunning = d.server_running;
     updateHfProgress(d.hf_download);
     updateBenchProgress(d.bench);
+
+    // Surface startup/crash failures once, rather than on every tick.
+    if (d.server_error && d.server_error !== lastServerError) {
+        lastServerError = d.server_error;
+        showToast(d.server_error, 'error');
+    } else if (!d.server_error) {
+        lastServerError = null;
+    }
     const dot = document.getElementById('status-dot');
     const txt = document.getElementById('status-text');
     dot.className = 'status-dot ' + (serverRunning ? 'running' : 'stopped');
