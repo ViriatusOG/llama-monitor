@@ -42,11 +42,13 @@
                     <button class="btn-sm btn-preset-reset" onclick="resetPresets()" title="Reset all presets to built-in defaults">Reset</button>
                 </span>
             </label>
-            <label class="num-xs">Port
-                <input id="port" type="number" value="8080" style="width: 70px;">
-            </label>
-            <button class="btn btn-start" id="btn-start" onclick="doStart()">Start</button>
-            <button class="btn btn-stop" id="btn-stop" onclick="doStop()" disabled>Stop</button>
+            <div class="control-actions">
+                <label class="num-xs">Port
+                    <input id="port" type="number" value="8080" style="width: 70px;">
+                </label>
+                <button class="btn btn-start" id="btn-toggle" onclick="doToggle()">Start</button>
+                <button class="btn btn-open-ui" id="btn-open-ui" onclick="openLlamaUi()" style="display:none;">Open UI</button>
+            </div>
         </div>
 
         <h2>Inference</h2>

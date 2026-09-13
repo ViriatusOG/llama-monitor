@@ -580,25 +580,31 @@ function getConfig() {
     };
 }
 
-async function doStart() {
-    const config = getConfig();
-    if (!config.model_path) {
-        showToast('No model path set. Edit the preset to select a model.', 'error');
-        return;
+async function doToggle() {
+    const btn = document.getElementById('btn-toggle');
+    btn.disabled = true;
+    if (serverRunning) {
+        await fetch('/api/stop', { method: 'POST' });
+    } else {
+        const config = getConfig();
+        if (!config.model_path) {
+            showToast('No model path set. Edit the preset to select a model.', 'error');
+            btn.disabled = false;
+            return;
+        }
+        const resp = await fetch('/api/start', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(config),
+        });
+        const data = await resp.json();
+        if (!data.ok) showToast('Start failed: ' + (data.error || 'unknown'), 'error');
     }
-    document.getElementById('btn-start').disabled = true;
-    const resp = await fetch('/api/start', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(config),
-    });
-    const data = await resp.json();
-    if (!data.ok) showToast('Start failed: ' + (data.error || 'unknown'), 'error');
 }
 
-async function doStop() {
-    document.getElementById('btn-stop').disabled = true;
-    await fetch('/api/stop', { method: 'POST' });
+function openLlamaUi() {
+    const port = document.getElementById('port').value || '8080';
+    window.open('http://' + location.hostname + ':' + port, '_blank');
 }
 
 // WebSocket
@@ -612,8 +618,13 @@ ws.onmessage = e => {
     const txt = document.getElementById('status-text');
     dot.className = 'status-dot ' + (serverRunning ? 'running' : 'stopped');
     txt.textContent = serverRunning ? 'Running' : 'Stopped';
-    document.getElementById('btn-start').disabled = serverRunning;
-    document.getElementById('btn-stop').disabled = !serverRunning;
+
+    const toggleBtn = document.getElementById('btn-toggle');
+    toggleBtn.disabled = false;
+    toggleBtn.textContent = serverRunning ? 'Stop' : 'Start';
+    toggleBtn.className = 'btn ' + (serverRunning ? 'btn-stop' : 'btn-start');
+
+    document.getElementById('btn-open-ui').style.display = serverRunning ? 'inline-block' : 'none';
 
     // Inference
     const l = d.llama;

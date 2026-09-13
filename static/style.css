@@ -16,6 +16,7 @@ h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
 .control-bar .wide-label { flex: 0 1 auto; }
 .control-bar .wide-label input { width: 120px; }
 .control-bar .chk { flex-direction: row; align-items: center; gap: 6px; font-size: 0.85rem; color: #d8dee9; padding-bottom: 4px; }
+.control-bar .control-actions { display: flex; align-items: flex-end; gap: 10px; align-self: flex-start; }
 .btn { padding: 6px 18px; border: none; border-radius: 4px; font-size: 0.85rem; cursor: pointer; font-weight: 600; }
 .btn-start { background: #a3be8c; color: #2e3440; }
 .btn-stop { background: #bf616a; color: #eceff4; }
