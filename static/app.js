@@ -665,19 +665,39 @@ function renderVramBar(d) {
             weightMb = gpuUsedMb - ctxMb;
         }
 
+        const gpuTotalGb = ((m.vram_total || 0) / 1024).toFixed(1);
+
         if (weightMb > 0) {
-            segments.push({ widthPct: (weightMb / totalVramMb) * 100, color: vendor.color, title: card + ': ' + (weightMb / 1024).toFixed(1) + 'GB weights/other' });
+            segments.push({
+                widthPct: (weightMb / totalVramMb) * 100,
+                color: vendor.color,
+                label: (weightMb / 1024).toFixed(1) + ' / ' + gpuTotalGb + ' GB',
+                title: card + ': ' + (weightMb / 1024).toFixed(1) + 'GB of ' + gpuTotalGb + 'GB used (weights/other)',
+            });
         }
         if (ctxMb > 0.1) {
-            segments.push({ widthPct: (ctxMb / totalVramMb) * 100, color: VRAM_CONTEXT_COLOR, title: card + ': ' + (ctxMb / 1024).toFixed(1) + 'GB context (est.)' });
+            segments.push({
+                widthPct: (ctxMb / totalVramMb) * 100,
+                color: VRAM_CONTEXT_COLOR,
+                label: (ctxMb / 1024).toFixed(1) + ' GB',
+                title: card + ': ' + (ctxMb / 1024).toFixed(1) + 'GB context (est.)',
+            });
         }
     });
 
     const freePct = Math.max(0, 100 - segments.reduce((s, seg) => s + seg.widthPct, 0));
+    const freeGb = ((totalVramMb * freePct / 100) / 1024).toFixed(1);
+
+    // Only render text inside a segment when it is wide enough to fit,
+    // otherwise the label overflows into neighbouring segments.
+    const segText = (seg) => seg.widthPct >= 12 ? seg.label : '';
 
     setBars(segments.map(seg =>
-        '<div class="vram-seg" style="width:' + seg.widthPct.toFixed(2) + '%; background:' + seg.color + ';" title="' + seg.title + '"></div>'
-    ).join('') + '<div class="vram-seg vram-seg-free" style="width:' + freePct.toFixed(2) + '%;" title="Free: ' + ((totalVramMb * freePct / 100) / 1024).toFixed(1) + 'GB"></div>');
+        '<div class="vram-seg" style="width:' + seg.widthPct.toFixed(2) + '%; background:' + seg.color + ';" title="' + seg.title + '">' +
+        '<span class="vram-seg-label">' + segText(seg) + '</span></div>'
+    ).join('') +
+        '<div class="vram-seg vram-seg-free" style="width:' + freePct.toFixed(2) + '%;" title="Free: ' + freeGb + 'GB">' +
+        '<span class="vram-seg-label vram-seg-label-free">' + (freePct >= 12 ? freeGb + ' GB free' : '') + '</span></div>');
 
     const legendItems = Array.from(legendVendors).map(v => {
         const [label, color] = v.split('|');

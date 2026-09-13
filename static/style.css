@@ -45,9 +45,11 @@ h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
 
 /* Inference panel */
 .inference-panel { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 16px; }
-.vram-bar-wrap { background: #2e3440; border-radius: 6px; overflow: hidden; height: 26px; margin-bottom: 8px; border: 1px solid #3b4252; }
+.vram-bar-wrap { background: #2e3440; border-radius: 6px; overflow: hidden; height: 30px; margin-bottom: 8px; border: 1px solid #3b4252; }
 .vram-bar { display: flex; height: 100%; width: 100%; }
-.vram-seg { height: 100%; transition: width 0.4s ease; }
+.vram-seg { height: 100%; transition: width 0.4s ease; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.vram-seg-label { font-size: 0.7rem; font-family: monospace; color: #2e3440; font-weight: 600; white-space: nowrap; }
+.vram-seg-label-free { color: #8899aa; font-weight: 400; }
 .vram-seg-free { background: transparent; }
 .vram-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; font-size: 0.75rem; color: #8899aa; }
 .vram-legend-item { display: flex; align-items: center; gap: 5px; }
