@@ -45,6 +45,30 @@ h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
 
 /* Inference panel */
 .inference-panel { display: flex; gap: 20px; flex-wrap: wrap; margin-bottom: 16px; }
+.vram-bar-wrap { background: #2e3440; border-radius: 6px; overflow: hidden; height: 26px; margin-bottom: 8px; border: 1px solid #3b4252; }
+.vram-bar { display: flex; height: 100%; width: 100%; }
+.vram-seg { height: 100%; transition: width 0.4s ease; }
+.vram-seg-free { background: transparent; }
+.vram-legend { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; font-size: 0.75rem; color: #8899aa; }
+.vram-legend-item { display: flex; align-items: center; gap: 5px; }
+.vram-legend-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+.bench-grid-header, .bench-grid-row {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 6px 4px;
+}
+.bench-grid-header {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #6a7585;
+    border-bottom: 1px solid #4c566a;
+}
+.bench-grid-row { font-size: 0.82rem; font-family: monospace; color: #d8dee9; border-bottom: 1px solid #434c5e; }
+.bench-grid-row.bench-best { color: #a3be8c; font-weight: 600; }
 .metric-card { background: #3b4252; border-radius: 8px; padding: 12px 18px; min-width: 140px; }
 .metric-label { font-size: 0.75rem; color: #8899aa; text-transform: uppercase; letter-spacing: 0.5px; }
 .metric-value { font-family: monospace; font-size: 1.3rem; margin-top: 4px; }
@@ -295,7 +319,7 @@ h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
 /* Models tab table (grid-based, distinct from the 2-column file browser) */
 .model-grid-header, .model-grid-row {
     display: grid;
-    grid-template-columns: 2fr 1fr 0.8fr 1fr 1fr 1fr auto;
+    grid-template-columns: 2fr 0.8fr 0.8fr 1.2fr 1fr 1fr 1fr auto;
     gap: 10px;
     align-items: center;
     padding: 8px 16px;
@@ -315,6 +339,8 @@ h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
 .model-grid-row .model-name { color: #d8dee9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
 .model-grid-row .model-cell { color: #6a7585; font-size: 0.78rem; font-family: monospace; }
 .model-grid-row .model-delete-cell { justify-self: end; }
+.vram-fit-ok { color: #a3be8c !important; }
+.vram-fit-bad { color: #bf616a !important; }
 .fb-empty { padding: 16px; color: #6a7585; text-align: center; font-size: 0.82rem; }
 
 /* Toast notifications */

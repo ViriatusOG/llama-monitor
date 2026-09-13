@@ -4,11 +4,15 @@ function switchTab(name) {
     document.getElementById('page-' + name).classList.add('active');
     document.getElementById('tab-' + name).classList.add('active');
     if (name === 'models') loadModelsTab();
+    if (name === 'bench') populateBenchModels();
 }
 
 let presets = [];
 let serverRunning = false;
 let prevLogLen = 0;
+let totalVramMb = 0;
+let usedVramMb = 0;
+let allModelsCache = [];
 
 // --- Settings Persistence (backend) ---
 
@@ -244,6 +248,174 @@ function fileBrowserSelect(path) {
     closeFileBrowser();
 }
 
+// --- Optimize / Benchmark ---
+
+let benchRunning = false;
+
+async function populateBenchModels() {
+    const splitsEl = document.getElementById('bench-splits');
+    if (splitsEl && !splitsEl.value) {
+        splitsEl.value = '50/50, 55/45, 61/39, 65/35, 70/30';
+    }
+    const sel = document.getElementById('bench-model-select');
+    if (!sel) return;
+    const prev = sel.value;
+    await loadModelsCache();
+    if (allModelsCache.length === 0) {
+        sel.innerHTML = '<option value="">No models found -- download one first</option>';
+        return;
+    }
+    sel.innerHTML = allModelsCache.map(m =>
+        '<option value="' + m.path + '">' + (m.model_name || m.filename) +
+        (m.quant_type ? ' (' + m.quant_type + ')' : '') + ' \u2014 ' + m.size_display + '</option>'
+    ).join('');
+    if (prev) sel.value = prev;
+    if (!sel.value && sel.options.length > 0) sel.selectedIndex = 0;
+}
+
+async function toggleBenchmark() {
+    if (benchRunning) {
+        const proceed = await showConfirm('Stop Benchmark',
+            'Stop the running benchmark? Results collected so far will be kept.');
+        if (!proceed) return;
+        try {
+            const resp = await fetch('/api/bench/cancel', { method: 'POST' });
+            const data = await resp.json();
+            if (!data.ok) showToast('Could not stop: ' + (data.error || 'unknown'), 'error');
+            else showToast('Stopping benchmark...', 'success');
+        } catch (err) {
+            showToast('Could not stop: ' + err.message, 'error');
+        }
+        return;
+    }
+
+    if (serverRunning) {
+        showToast('Stop the llama.cpp server first -- benchmarking needs the GPUs', 'error');
+        return;
+    }
+
+    const modelPath = document.getElementById('bench-model-select').value;
+    if (!modelPath) {
+        showToast('No model selected', 'error');
+        return;
+    }
+    const splits = document.getElementById('bench-splits').value
+        .split(/[\n,]/)
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+    if (splits.length === 0) {
+        showToast('Enter at least one tensor split ratio', 'error');
+        return;
+    }
+    const ngl = parseInt(document.getElementById('bench-ngl').value) || 999;
+
+    try {
+        const resp = await fetch('/api/bench/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model_path: modelPath, splits: splits, gpu_layers: ngl }),
+        });
+        const data = await resp.json();
+        if (!data.ok) {
+            showToast('Benchmark failed: ' + (data.error || 'unknown'), 'error');
+            return;
+        }
+        document.getElementById('bench-panel').style.display = '';
+        showToast('Benchmark started -- this will take a few minutes', 'success');
+    } catch (err) {
+        showToast('Benchmark failed: ' + err.message, 'error');
+    }
+}
+
+async function applyBenchSplit(split) {
+    const id = document.getElementById('preset-select').value;
+    const p = presets.find(pr => pr.id === id);
+    if (!p) {
+        showToast('No preset selected to apply this to', 'error');
+        return;
+    }
+    const proceed = await showConfirm('Apply Tensor Split',
+        'Set tensor split to "' + split + '" on preset "' + p.name + '"?');
+    if (!proceed) return;
+
+    const updated = Object.assign({}, p, { tensor_split: split });
+    try {
+        const resp = await fetch('/api/presets/' + encodeURIComponent(p.id), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updated),
+        });
+        if (!resp.ok) {
+            showToast('Failed to update preset', 'error');
+            return;
+        }
+        showToast('Applied ' + split + ' to ' + p.name, 'success');
+        loadPresets();
+    } catch (err) {
+        showToast('Failed to update preset: ' + err.message, 'error');
+    }
+}
+
+let benchLastDone = false;
+
+function updateBenchProgress(b) {
+    if (!b) return;
+    const panel = document.getElementById('bench-panel');
+    const statusEl = document.getElementById('bench-status');
+    const barEl = document.getElementById('bench-bar');
+    const resultsEl = document.getElementById('bench-results');
+
+    // Button and badge state must update even when idle, so they don't
+    // stay stuck showing a stale label from a previous run.
+    benchRunning = b.running;
+    const toggleBtn = document.getElementById('btn-bench-toggle');
+    if (toggleBtn) {
+        toggleBtn.textContent = b.running ? 'Stop Benchmark' : 'Start Benchmark';
+        toggleBtn.className = 'btn ' + (b.running ? 'btn-stop' : 'btn-start');
+    }
+    const benchBadge = document.getElementById('badge-bench');
+    if (benchBadge) {
+        benchBadge.textContent = b.running
+            ? ' ' + b.completed + '/' + b.total
+            : (b.results.length > 0 ? ' ' + b.results.length : '');
+    }
+
+    if (!b.running && !b.done && b.results.length === 0) {
+        return;
+    }
+
+    panel.style.display = '';
+
+    const pct = b.total > 0 ? (b.completed / b.total) * 100 : 0;
+    barEl.style.width = pct.toFixed(1) + '%';
+
+    if (b.running) {
+        statusEl.textContent = 'Benchmarking ' + (b.current_split || '...') +
+            '  (' + b.completed + ' of ' + b.total + ' complete)';
+        benchLastDone = false;
+    } else if (b.done) {
+        statusEl.textContent = b.cancelled
+            ? 'Stopped. ' + b.results.length + ' of ' + b.total + ' ratios completed.'
+            : (b.best_split ? 'Done. Fastest split: ' + b.best_split : 'Done.');
+        if (!benchLastDone) {
+            benchLastDone = true;
+            if (b.error) showToast('Benchmark error: ' + b.error, 'error');
+            else showToast('Benchmark complete', 'success');
+        }
+    }
+
+    resultsEl.innerHTML = b.results.map(r => {
+        const isBest = b.best_split === r.tensor_split;
+        return '<div class="bench-grid-row' + (isBest ? ' bench-best' : '') + '">' +
+            '<span>' + r.tensor_split + (isBest ? ' \u2605' : '') + '</span>' +
+            '<span>' + r.prompt_tps.toFixed(1) + '</span>' +
+            '<span>' + r.gen_tps.toFixed(1) + '</span>' +
+            '<span>' + (b.done ? '<button class="btn-sm btn-preset" onclick="applyBenchSplit(\'' + r.tensor_split + '\')">Apply</button>' : '') + '</span>' +
+            '</div>';
+    }).join('');
+}
+
+
 // --- Generic Confirm Modal ---
 
 let confirmResolve = null;
@@ -348,12 +520,14 @@ async function hfShowFiles(repoId) {
             fileListEl.innerHTML = '<div class="fb-empty">No .gguf files found</div>';
             return;
         }
-        fileListEl.innerHTML = data.files.map(f =>
-            '<div class="fb-entry fb-entry-file fb-match" onclick="hfDownload(\'' + f.filename.replace(/'/g, "\\'") + '\', \'' + f.size_display + '\')">' +
-            '<span class="fb-entry-icon">\u{1F4C4}</span>' +
-            '<span class="fb-entry-name">' + f.filename + '</span>' +
-            '<span class="fb-entry-size">' + f.size_display + '</span></div>'
-        ).join('');
+        fileListEl.innerHTML = data.files.map(f => {
+            const fit = vramFitCheck(f.size_bytes);
+            return '<div class="fb-entry fb-entry-file fb-match" onclick="hfDownload(\'' + f.filename.replace(/'/g, "\\'") + '\', \'' + f.size_display + '\')">' +
+                '<span class="fb-entry-icon">\u{1F4C4}</span>' +
+                '<span class="fb-entry-name">' + f.filename + '</span>' +
+                '<span class="fb-entry-size ' + fit.cls + '" title="' + fit.title + '">' + fit.label + '</span>' +
+                '<span class="fb-entry-size">' + f.size_display + '</span></div>';
+        }).join('');
     } catch (err) {
         fileListEl.innerHTML = '<div class="fb-empty">Error: ' + err.message + '</div>';
     }
@@ -393,15 +567,125 @@ async function hfDownload(filename, sizeDisplay) {
     }
 }
 
+function vramFitCheck(sizeBytes) {
+    if (totalVramMb <= 0) {
+        return { label: '\u2014', cls: '', title: 'GPU VRAM data not yet available' };
+    }
+    const sizeMb = sizeBytes / 1024 / 1024;
+    // Reserve headroom for compute buffers and KV cache -- this checks
+    // model weights only, not a running-context estimate.
+    const overheadMb = 1536;
+    const usableMb = totalVramMb - overheadMb;
+    const totalGb = (totalVramMb / 1024).toFixed(1);
+    const sizeGb = (sizeMb / 1024).toFixed(1);
+    if (sizeMb <= usableMb) {
+        return {
+            label: '\u2713 Fits (' + sizeGb + 'GB / ' + totalGb + 'GB)',
+            cls: 'vram-fit-ok',
+            title: 'Model weights fit within combined VRAM (' + totalGb + 'GB). Actual usable context depends on remaining headroom.',
+        };
+    }
+    return {
+        label: '\u2717 Too large (' + sizeGb + 'GB / ' + totalGb + 'GB)',
+        cls: 'vram-fit-bad',
+        title: 'Model weights exceed combined VRAM (' + totalGb + 'GB). Would need a smaller quantization or CPU offload.',
+    };
+}
+
 async function refreshModels() {
     try {
         await fetch('/api/models/refresh', { method: 'POST' });
     } catch (err) {
         // Non-critical -- model discovery is best-effort
     }
+    await loadModelsCache();
     if (document.getElementById('page-models').classList.contains('active')) {
         loadModelsTab();
     }
+}
+
+async function loadModelsCache() {
+    try {
+        const resp = await fetch('/api/models');
+        allModelsCache = await resp.json();
+    } catch (err) {
+        // Non-critical
+    }
+}
+
+function vendorColor(cardName) {
+    const n = cardName.toLowerCase();
+    if (n.includes('amd') || n.includes('radeon')) return { color: '#bf616a', label: 'AMD' };
+    if (n.includes('nvidia') || n.includes('geforce') || n.includes('quadro') || n.includes('tesla')) return { color: '#a3be8c', label: 'NVIDIA' };
+    if (n.includes('intel') || n.includes('arc')) return { color: '#5e81ac', label: 'Intel' };
+    return { color: '#6a7585', label: cardName };
+}
+
+const VRAM_CONTEXT_COLOR = '#b48ead';
+
+function renderVramBar(d) {
+    const barEls = document.querySelectorAll('.vram-bar');
+    const legendEls = document.querySelectorAll('.vram-legend');
+    const setBars = html => barEls.forEach(el => { el.innerHTML = html; });
+    const setLegends = html => legendEls.forEach(el => { el.innerHTML = html; });
+    const gpuList = Object.entries(d.gpu);
+
+    if (gpuList.length === 0 || totalVramMb <= 0) {
+        setBars('');
+        setLegends('<span>No GPU data yet</span>');
+        return;
+    }
+
+    // Try to attribute used VRAM to model weights vs context/overhead,
+    // using the loaded model's file size as an estimate of weight usage.
+    // This is a proportional approximation split evenly across GPUs by
+    // their share of total used VRAM -- it does not assume any specific
+    // tensor-split device ordering, since that isn't reliably knowable
+    // from GPU telemetry alone.
+    let modelSizeMb = 0;
+    if (d.server_running && d.model_path && allModelsCache.length > 0) {
+        const match = allModelsCache.find(m => m.path === d.model_path);
+        if (match) modelSizeMb = match.size_bytes / 1024 / 1024;
+    }
+    const contextMb = modelSizeMb > 0 ? Math.max(0, usedVramMb - modelSizeMb) : 0;
+
+    const segments = [];
+    const legendVendors = new Set();
+
+    gpuList.forEach(([card, m]) => {
+        const vendor = vendorColor(card);
+        legendVendors.add(vendor.label + '|' + vendor.color);
+        const gpuUsedMb = m.vram_used || 0;
+        if (gpuUsedMb <= 0) return;
+
+        let weightMb = gpuUsedMb;
+        let ctxMb = 0;
+        if (contextMb > 0 && usedVramMb > 0) {
+            ctxMb = gpuUsedMb * (contextMb / usedVramMb);
+            weightMb = gpuUsedMb - ctxMb;
+        }
+
+        if (weightMb > 0) {
+            segments.push({ widthPct: (weightMb / totalVramMb) * 100, color: vendor.color, title: card + ': ' + (weightMb / 1024).toFixed(1) + 'GB weights/other' });
+        }
+        if (ctxMb > 0.1) {
+            segments.push({ widthPct: (ctxMb / totalVramMb) * 100, color: VRAM_CONTEXT_COLOR, title: card + ': ' + (ctxMb / 1024).toFixed(1) + 'GB context (est.)' });
+        }
+    });
+
+    const freePct = Math.max(0, 100 - segments.reduce((s, seg) => s + seg.widthPct, 0));
+
+    setBars(segments.map(seg =>
+        '<div class="vram-seg" style="width:' + seg.widthPct.toFixed(2) + '%; background:' + seg.color + ';" title="' + seg.title + '"></div>'
+    ).join('') + '<div class="vram-seg vram-seg-free" style="width:' + freePct.toFixed(2) + '%;" title="Free: ' + ((totalVramMb * freePct / 100) / 1024).toFixed(1) + 'GB"></div>');
+
+    const legendItems = Array.from(legendVendors).map(v => {
+        const [label, color] = v.split('|');
+        return '<span class="vram-legend-item"><span class="vram-legend-swatch" style="background:' + color + ';"></span>' + label + '</span>';
+    });
+    legendItems.push('<span class="vram-legend-item"><span class="vram-legend-swatch" style="background:' + VRAM_CONTEXT_COLOR + ';"></span>Context/KV (est.)</span>');
+    legendItems.push('<span class="vram-legend-item"><span class="vram-legend-swatch" style="background:transparent; border:1px solid #4c566a;"></span>Free (' + ((totalVramMb - usedVramMb) / 1024).toFixed(1) + 'GB)</span>');
+    setLegends(legendItems.join(''));
 }
 
 async function loadModelsTab() {
@@ -425,10 +709,12 @@ async function loadModelsTab() {
             const hfUpdated = m.hf_last_modified
                 ? new Date(m.hf_last_modified).toLocaleDateString()
                 : '\u2014';
+            const fit = vramFitCheck(m.size_bytes);
             return '<div class="model-grid-row">' +
                 '<span class="model-name" title="' + m.filename + '">\u{1F4C4} ' + (m.model_name || m.filename) + '</span>' +
                 '<span class="model-cell">' + (m.quant_type || '\u2014') + '</span>' +
                 '<span class="model-cell">' + m.size_display + '</span>' +
+                '<span class="model-cell ' + fit.cls + '" title="' + fit.title + '">' + fit.label + '</span>' +
                 '<span class="model-cell">' + downloads + '</span>' +
                 '<span class="model-cell">' + downloadedOn + '</span>' +
                 '<span class="model-cell">' + hfUpdated + '</span>' +
@@ -863,6 +1149,7 @@ function openLlamaUi() {
 }
 
 // WebSocket
+loadModelsCache();
 const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
 ws.onmessage = e => {
     const d = JSON.parse(e.data);
@@ -870,6 +1157,7 @@ ws.onmessage = e => {
     // Server state
     serverRunning = d.server_running;
     updateHfProgress(d.hf_download);
+    updateBenchProgress(d.bench);
     const dot = document.getElementById('status-dot');
     const txt = document.getElementById('status-text');
     dot.className = 'status-dot ' + (serverRunning ? 'running' : 'stopped');
@@ -900,7 +1188,11 @@ ws.onmessage = e => {
 
     // GPU table
     const tbody = document.getElementById('gpu-rows');
-    tbody.innerHTML = Object.entries(d.gpu).map(([card, m]) => {
+    const gpuList = Object.entries(d.gpu);
+    totalVramMb = gpuList.reduce((sum, [, m]) => sum + (m.vram_total || 0), 0);
+    usedVramMb = gpuList.reduce((sum, [, m]) => sum + (m.vram_used || 0), 0);
+    renderVramBar(d);
+    tbody.innerHTML = gpuList.map(([card, m]) => {
         const capped = m.power_consumption >= m.power_limit && m.power_limit > 0;
         const pcls = capped ? 'value capped' : 'value power';
         const ptxt = capped ? m.power_consumption.toFixed(1) + 'W!' : m.power_consumption.toFixed(1) + 'W / ' + m.power_limit + 'W';

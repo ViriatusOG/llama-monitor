@@ -28,6 +28,7 @@
         <button class="tab-btn" onclick="switchTab('chat')" id="tab-chat">Chat<span class="tab-badge" id="badge-chat"></span></button>
         <button class="tab-btn" onclick="switchTab('logs')" id="tab-logs">Logs<span class="tab-badge" id="badge-logs"></span></button>
         <button class="tab-btn" onclick="switchTab('models')" id="tab-models">Models<span class="tab-badge" id="badge-models"></span></button>
+        <button class="tab-btn" onclick="switchTab('bench')" id="tab-bench">Benchmark<span class="tab-badge" id="badge-bench"></span></button>
     </div>
 
     <!-- Page: Server (control + monitor) -->
@@ -60,6 +61,11 @@
             <div class="metric-card"><div class="metric-label">Slots</div><div class="metric-value slots" id="m-slots">&mdash;</div></div>
             <div class="metric-card"><div class="metric-label">Server Status</div><div class="metric-value" id="m-status">&mdash;</div></div>
         </div>
+        <h2>VRAM Usage</h2>
+        <div class="vram-bar-wrap">
+            <div class="vram-bar" id="vram-bar"></div>
+        </div>
+        <div class="vram-legend" id="vram-legend"></div>
         <h2>GPUs</h2>
         <div class="table-wrap">
         <table class="gpu-table">
@@ -107,9 +113,43 @@
             </div>
         </div>
         <div class="model-grid-header">
-            <span>Model</span><span>Quant</span><span>Size</span><span>Downloads</span><span>Downloaded</span><span>HF Updated</span><span></span>
+            <span>Model</span><span>Quant</span><span>Size</span><span>Fits VRAM?</span><span>Downloads</span><span>Downloaded</span><span>HF Updated</span><span></span>
         </div>
         <div id="models-list" style="max-height:none;"></div>
+    </div>
+
+    <!-- Page: Benchmark -->
+    <div class="page" id="page-bench">
+        <h2>Find Best Tensor Split</h2>
+        <div class="control-bar">
+            <label class="preset-label">Model
+                <select id="bench-model-select"></select>
+            </label>
+            <label class="num-sm" title="One ratio per line or comma-separated. Use / between GPUs, e.g. 65/35">Ratios
+                <input type="text" id="bench-splits" style="width:220px;" placeholder="50/50, 61/39, 65/35">
+            </label>
+            <label class="num-xs" title="Layers offloaded to GPU during benchmarking">GPU Layers
+                <input type="number" id="bench-ngl" value="999" style="width:70px;">
+            </label>
+            <label class="num-sm">&nbsp;
+                <button class="btn btn-start" id="btn-bench-toggle" onclick="toggleBenchmark()" style="width:160px;">Start Benchmark</button>
+            </label>
+        </div>
+        <div id="bench-panel" style="display:none; background:#3b4252; border-radius:6px; padding:12px 16px; margin-bottom:16px;">
+            <div id="bench-status" style="font-size:0.82rem; color:#8899aa; margin-bottom:8px;"></div>
+            <div style="background:#2e3440; border-radius:4px; height:8px; overflow:hidden; margin-bottom:10px;">
+                <div id="bench-bar" style="background:#88c0d1; height:100%; width:0%; transition:width 0.3s;"></div>
+            </div>
+            <div class="bench-grid-header">
+                <span>Tensor Split</span><span>Prompt t/s</span><span>Generation t/s</span><span></span>
+            </div>
+            <div id="bench-results"></div>
+        </div>
+        <h2>VRAM Usage</h2>
+        <div class="vram-bar-wrap">
+            <div class="vram-bar"></div>
+        </div>
+        <div class="vram-legend"></div>
     </div>
 
 <!-- Config Modal -->
@@ -205,7 +245,7 @@
             <span>Model</span><span>Downloads</span>
         </div>
         <div id="hf-file-header" class="fb-header" style="display:none;">
-            <span>File (click to download)</span><span>Size</span>
+            <span>File (click to download)</span><span>Fits VRAM?</span><span>Size</span>
         </div>
         <div class="modal-body" style="padding:0;">
             <div id="hf-repo-list" class="fb-entries"></div>
@@ -327,7 +367,7 @@
             <details class="modal-section">
                 <summary>GPU Distribution</summary>
                 <label class="modal-field" title="VRAM distribution ratio across GPUs (e.g. '7,8,8,8' for 4 GPUs). Leave empty for single GPU.">Tensor Split (-ts)
-                    <input type="text" id="modal-tensor-split" placeholder="7,8,8,8">
+                    <input type="text" id="modal-tensor-split" placeholder="7/8/8/8">
                 </label>
                 <div class="modal-row">
                     <label class="modal-field" title="How to split the model across GPUs: layer (default, split by layer) or row (split large tensors).">Split Mode
