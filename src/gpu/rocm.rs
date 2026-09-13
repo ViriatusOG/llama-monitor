@@ -16,6 +16,7 @@ impl GpuBackend for RocmBackend {
                 "--showuse",
                 "--showpower",
                 "--showmaxpower",
+                "--showproductname",
                 "--showmeminfo",
                 "vram",
             ])
@@ -105,11 +106,12 @@ pub fn parse_rocm_json(json: &serde_json::Value) -> Result<BTreeMap<String, GpuM
                 .unwrap_or(0)
         };
 
+        let display_name = card.get("Card Series").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_else(|| card_name.clone());
         let sclk_mhz = parse_clock("sclk clock speed:");
         let mclk_mhz = parse_clock("mclk clock speed:");
 
         metrics.insert(
-            card_name.clone(),
+            display_name,
             GpuMetrics {
                 temp,
                 load,

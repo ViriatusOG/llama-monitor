@@ -43,7 +43,7 @@ pub fn parse_nvidia_csv(csv: &str) -> Result<BTreeMap<String, GpuMetrics>> {
             continue;
         }
 
-        let index = fields[0];
+        let _index = fields[0];
         let name = fields[1];
         let temp = fields[2].parse::<f32>().unwrap_or(0.0);
         let load = fields[3].parse::<u32>().unwrap_or(0);
@@ -54,7 +54,7 @@ pub fn parse_nvidia_csv(csv: &str) -> Result<BTreeMap<String, GpuMetrics>> {
         let sclk_mhz = fields[8].parse::<u32>().unwrap_or(0);
         let mclk_mhz = fields[9].parse::<u32>().unwrap_or(0);
 
-        let card_name = format!("GPU{index} {name}");
+        let card_name = name.to_string();
         metrics.insert(
             card_name,
             GpuMetrics {
