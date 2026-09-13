@@ -1,5 +1,5 @@
 {
-    "name": "Llama Monitor",
+    "name": "Llama Admin Monitor",
     "short_name": "LlamaMonitor",
     "start_url": "/",
     "display": "standalone",

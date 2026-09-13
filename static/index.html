@@ -9,13 +9,13 @@
     <link rel='manifest' href='/manifest.json'>
     <link rel='icon' href='/icon.svg' type='image/svg+xml'>
     <link rel='apple-touch-icon' href='/icon.svg'>
-    <title>Llama Monitor</title>
+    <title>Llama Admin Monitor</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
     <div class="title">
-        <h1>Llama Monitor</h1>
+        <h1>Llama Admin Monitor</h1>
         <div style="display:flex;align-items:center;gap:8px;padding-bottom:4px;">
             <span class="status-dot stopped" id="status-dot"></span>
             <span class="status-text" id="status-text">Stopped</span>
@@ -27,6 +27,7 @@
         <button class="tab-btn active" onclick="switchTab('server')" id="tab-server">Server<span class="tab-badge" id="badge-server"></span></button>
         <button class="tab-btn" onclick="switchTab('chat')" id="tab-chat">Chat<span class="tab-badge" id="badge-chat"></span></button>
         <button class="tab-btn" onclick="switchTab('logs')" id="tab-logs">Logs<span class="tab-badge" id="badge-logs"></span></button>
+        <button class="tab-btn" onclick="switchTab('models')" id="tab-models">Models<span class="tab-badge" id="badge-models"></span></button>
     </div>
 
     <!-- Page: Server (control + monitor) -->
@@ -90,6 +91,27 @@
         <div class="log-panel" id="log-panel" style="flex:1;"></div>
     </div>
 
+    <!-- Page: Models -->
+    <div class="page" id="page-models">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h2 style="margin:0;">Downloaded Models</h2>
+            <button class="btn-sm btn-preset" onclick="openHfModal()">Download from HF</button>
+        </div>
+        <div id="models-hf-banner" style="display:none; background:#3b4252; border-radius:6px; padding:10px 14px; margin-bottom:10px;">
+            <div style="display:flex; justify-content:space-between; font-size:0.8rem; color:#8899aa; margin-bottom:4px;">
+                <span id="models-hf-banner-name"></span>
+                <span id="models-hf-banner-pct"></span>
+            </div>
+            <div style="background:#2e3440; border-radius:4px; height:8px; overflow:hidden;">
+                <div id="models-hf-banner-bar" style="background:#88c0d1; height:100%; width:0%; transition:width 0.3s;"></div>
+            </div>
+        </div>
+        <div class="model-grid-header">
+            <span>Model</span><span>Quant</span><span>Size</span><span>Downloads</span><span>Downloaded</span><span>HF Updated</span><span></span>
+        </div>
+        <div id="models-list" style="max-height:none;"></div>
+    </div>
+
 <!-- Config Modal -->
 <div class="modal-overlay" id="config-modal">
     <div class="modal" style="width:540px;">
@@ -111,6 +133,12 @@
                     <div style="display:flex;gap:6px;">
                         <input type="text" id="set-server-cwd" placeholder=". (current dir)" style="flex:1;">
                         <button type="button" class="btn-sm btn-preset" onclick="openFileBrowser('set-server-cwd','dir')">Browse</button>
+                    </div>
+                </label>
+                <label class="modal-field" title="Directory where .gguf models live. Used for model discovery and Hugging Face downloads.">Models Directory
+                    <div style="display:flex;gap:6px;">
+                        <input type="text" id="set-models-dir" placeholder="/home/user/models" style="flex:1;">
+                        <button type="button" class="btn-sm btn-preset" onclick="openFileBrowser('set-models-dir','dir')">Browse</button>
                     </div>
                 </label>
             </details>
@@ -160,6 +188,61 @@
     </div>
 </div>
 
+<!-- Hugging Face Download Modal -->
+<div class="modal-overlay" id="hf-modal" style="z-index:1200;">
+    <div class="modal" style="width:640px;">
+        <div class="modal-header">
+            <h2>Download from Hugging Face</h2>
+            <button type="button" class="modal-close" onclick="closeHfModal()" aria-label="Close">&times;</button>
+        </div>
+        <div class="file-browser-bar">
+            <input type="text" id="hf-search-input" class="fb-path-input" placeholder="Search models (e.g. qwen, llama, mistral)..." style="flex:1;" onkeydown="if(event.key==='Enter')hfSearch()">
+            <button class="btn-sm btn-preset" onclick="hfSearch()">Search</button>
+            <button class="btn-sm btn-preset" id="hf-back-btn" onclick="hfShowRepos()" style="display:none;">&larr; Back</button>
+        </div>
+        <div id="hf-hint" style="padding:6px 16px; font-size:0.72rem; color:#6a7585;">Click a model to view its available files.</div>
+        <div id="hf-repo-header" class="fb-header">
+            <span>Model</span><span>Downloads</span>
+        </div>
+        <div id="hf-file-header" class="fb-header" style="display:none;">
+            <span>File (click to download)</span><span>Size</span>
+        </div>
+        <div class="modal-body" style="padding:0;">
+            <div id="hf-repo-list" class="fb-entries"></div>
+            <div id="hf-file-list" class="fb-entries" style="display:none;"></div>
+        </div>
+        <div id="hf-download-progress" style="display:none; padding:10px 16px; border-top:1px solid #3b4252;">
+            <div style="display:flex; justify-content:space-between; font-size:0.78rem; color:#8899aa; margin-bottom:4px;">
+                <span id="hf-progress-filename"></span>
+                <span id="hf-progress-pct"></span>
+            </div>
+            <div style="background:#2e3440; border-radius:4px; height:8px; overflow:hidden;">
+                <div id="hf-progress-bar" style="background:#88c0d1; height:100%; width:0%; transition:width 0.3s;"></div>
+            </div>
+        </div>
+        <div class="modal-buttons">
+            <button type="button" class="btn btn-modal-cancel" onclick="closeHfModal()">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Generic Confirm Modal -->
+<div class="modal-overlay" id="confirm-modal" style="z-index:1300;">
+    <div class="modal" style="width:420px;">
+        <div class="modal-header">
+            <h2 id="confirm-title">Confirm</h2>
+            <button type="button" class="modal-close" onclick="closeConfirmModal(false)" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p id="confirm-message" style="color:#d8dee9; font-size:0.9rem; line-height:1.5;"></p>
+        </div>
+        <div class="modal-buttons">
+            <button type="button" class="btn btn-modal-cancel" onclick="closeConfirmModal(false)">Cancel</button>
+            <button type="button" class="btn btn-modal-save" onclick="closeConfirmModal(true)">OK</button>
+        </div>
+    </div>
+</div>
+
 <!-- Toast notifications -->
 <div class="toast-container" id="toast-container"></div>
 
@@ -185,6 +268,7 @@
                     <div style="display:flex;gap:6px;">
                         <input type="text" id="modal-model-path" required style="flex:1;">
                         <button type="button" class="btn-sm btn-preset" onclick="openFileBrowser('modal-model-path','gguf')" title="Browse filesystem for .gguf files">Browse</button>
+                        <button type="button" class="btn-sm btn-preset" onclick="openHfModal()" title="Search and download a model from Hugging Face">Download from HF<span id="hf-badge" style="display:none; margin-left:5px; color:#a3be8c;"></span></button>
                     </div>
                     <span class="field-error-msg">Model path is required</span>
                 </label>

@@ -3,6 +3,7 @@ function switchTab(name) {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('page-' + name).classList.add('active');
     document.getElementById('tab-' + name).classList.add('active');
+    if (name === 'models') loadModelsTab();
 }
 
 let presets = [];
@@ -19,7 +20,7 @@ function collectSettings() {
         port: parseInt(document.getElementById('port').value) || 8080,
         llama_server_path: document.getElementById('set-server-path').value,
         llama_server_cwd: document.getElementById('set-server-cwd').value,
-        models_dir: '',
+        models_dir: document.getElementById('set-models-dir').value,
     };
 }
 
@@ -40,6 +41,7 @@ function applySettings(s) {
     if (s.port) document.getElementById('port').value = s.port;
     if (s.llama_server_path !== undefined) document.getElementById('set-server-path').value = s.llama_server_path;
     if (s.llama_server_cwd !== undefined) document.getElementById('set-server-cwd').value = s.llama_server_cwd;
+    if (s.models_dir !== undefined) document.getElementById('set-models-dir').value = s.models_dir;
 }
 
 // Auto-save on any control bar change
@@ -240,6 +242,259 @@ function fileBrowserSelect(path) {
     document.getElementById(fbTargetId).value = path || fbCurrentPath;
     document.getElementById(fbTargetId).dispatchEvent(new Event('input', { bubbles: true }));
     closeFileBrowser();
+}
+
+// --- Generic Confirm Modal ---
+
+let confirmResolve = null;
+
+function showConfirm(title, message) {
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-message').textContent = message;
+    document.getElementById('confirm-modal').classList.add('open');
+    return new Promise(resolve => {
+        confirmResolve = resolve;
+    });
+}
+
+function closeConfirmModal(result) {
+    document.getElementById('confirm-modal').classList.remove('open');
+    if (confirmResolve) {
+        confirmResolve(result);
+        confirmResolve = null;
+    }
+}
+
+document.getElementById('confirm-modal').addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeConfirmModal(false);
+});
+
+// --- Hugging Face Download ---
+
+let hfCurrentRepo = '';
+let hfDownloading = false;
+let hfLastHandledDone = false;
+
+function openHfModal() {
+    document.getElementById('hf-modal').classList.add('open');
+    document.getElementById('hf-search-input').value = '';
+    document.getElementById('hf-repo-list').innerHTML = '<div class="fb-empty">Search for a model above.</div>';
+    hfShowRepos();
+}
+
+function closeHfModal() {
+    document.getElementById('hf-modal').classList.remove('open');
+}
+
+document.getElementById('hf-modal').addEventListener('click', e => {
+    if (e.target === e.currentTarget) closeHfModal();
+});
+
+function hfShowRepos() {
+    document.getElementById('hf-repo-list').style.display = '';
+    document.getElementById('hf-file-list').style.display = 'none';
+    document.getElementById('hf-repo-header').style.display = '';
+    document.getElementById('hf-file-header').style.display = 'none';
+    document.getElementById('hf-back-btn').style.display = 'none';
+    document.getElementById('hf-hint').textContent = 'Click a model to view its available files.';
+}
+
+async function hfSearch() {
+    const q = document.getElementById('hf-search-input').value.trim();
+    const listEl = document.getElementById('hf-repo-list');
+    if (!q) return;
+    listEl.innerHTML = '<div class="fb-empty">Searching...</div>';
+    hfShowRepos();
+    try {
+        const resp = await fetch('/api/hf/search?q=' + encodeURIComponent(q));
+        const data = await resp.json();
+        if (data.error) {
+            listEl.innerHTML = '<div class="fb-empty">' + data.error + '</div>';
+            return;
+        }
+        if (!data.results || data.results.length === 0) {
+            listEl.innerHTML = '<div class="fb-empty">No results</div>';
+            return;
+        }
+        listEl.innerHTML = data.results.map(r =>
+            '<div class="fb-entry fb-entry-file fb-match" onclick="hfShowFiles(\'' + r.id.replace(/'/g, "\\'") + '\')">' +
+            '<span class="fb-entry-icon">\u{1F4E6}</span>' +
+            '<span class="fb-entry-name">' + r.id + '</span>' +
+            '<span class="fb-entry-size" title="Total downloads">' + r.downloads.toLocaleString() + ' downloads</span></div>'
+        ).join('');
+    } catch (err) {
+        listEl.innerHTML = '<div class="fb-empty">Error: ' + err.message + '</div>';
+    }
+}
+
+async function hfShowFiles(repoId) {
+    hfCurrentRepo = repoId;
+    document.getElementById('hf-repo-list').style.display = 'none';
+    document.getElementById('hf-repo-header').style.display = 'none';
+    document.getElementById('hf-file-header').style.display = '';
+    const fileListEl = document.getElementById('hf-file-list');
+    fileListEl.style.display = '';
+    document.getElementById('hf-back-btn').style.display = '';
+    document.getElementById('hf-hint').textContent = 'Click a file to start downloading it to your models directory.';
+    fileListEl.innerHTML = '<div class="fb-empty">Loading files...</div>';
+    try {
+        const resp = await fetch('/api/hf/files?repo=' + encodeURIComponent(repoId));
+        const data = await resp.json();
+        if (data.error) {
+            fileListEl.innerHTML = '<div class="fb-empty">' + data.error + '</div>';
+            return;
+        }
+        if (!data.files || data.files.length === 0) {
+            fileListEl.innerHTML = '<div class="fb-empty">No .gguf files found</div>';
+            return;
+        }
+        fileListEl.innerHTML = data.files.map(f =>
+            '<div class="fb-entry fb-entry-file fb-match" onclick="hfDownload(\'' + f.filename.replace(/'/g, "\\'") + '\', \'' + f.size_display + '\')">' +
+            '<span class="fb-entry-icon">\u{1F4C4}</span>' +
+            '<span class="fb-entry-name">' + f.filename + '</span>' +
+            '<span class="fb-entry-size">' + f.size_display + '</span></div>'
+        ).join('');
+    } catch (err) {
+        fileListEl.innerHTML = '<div class="fb-empty">Error: ' + err.message + '</div>';
+    }
+}
+
+async function hfDownload(filename, sizeDisplay) {
+    if (hfDownloading) {
+        showToast('A download is already in progress', 'error');
+        return;
+    }
+    const proceed = await showConfirm('Download Model', 'Download ' + filename + ' (' + (sizeDisplay || 'unknown size') + ') to your models directory?');
+    if (!proceed) {
+        return;
+    }
+    hfDownloading = true;
+    hfLastHandledDone = false;
+    document.getElementById('hf-download-progress').style.display = '';
+    document.getElementById('hf-progress-filename').textContent = filename;
+    document.getElementById('hf-progress-pct').textContent = '0%';
+    document.getElementById('hf-progress-bar').style.width = '0%';
+    try {
+        const resp = await fetch('/api/hf/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ repo: hfCurrentRepo, filename: filename }),
+        });
+        const data = await resp.json();
+        if (!data.ok) {
+            showToast('Download failed: ' + (data.error || 'unknown'), 'error');
+            hfDownloading = false;
+            document.getElementById('hf-download-progress').style.display = 'none';
+        }
+    } catch (err) {
+        showToast('Download failed: ' + err.message, 'error');
+        hfDownloading = false;
+        document.getElementById('hf-download-progress').style.display = 'none';
+    }
+}
+
+async function refreshModels() {
+    try {
+        await fetch('/api/models/refresh', { method: 'POST' });
+    } catch (err) {
+        // Non-critical -- model discovery is best-effort
+    }
+    if (document.getElementById('page-models').classList.contains('active')) {
+        loadModelsTab();
+    }
+}
+
+async function loadModelsTab() {
+    const listEl = document.getElementById('models-list');
+    listEl.innerHTML = '<div class="fb-empty">Loading...</div>';
+    try {
+        await fetch('/api/models/refresh', { method: 'POST' });
+        const resp = await fetch('/api/models');
+        const models = await resp.json();
+        document.getElementById('badge-models').textContent = models.length || '';
+        if (!models || models.length === 0) {
+            listEl.innerHTML = '<div class="fb-empty">No models found. Download one to get started.</div>';
+            return;
+        }
+        listEl.innerHTML = models.map(m => {
+            const safeName = m.filename.replace(/'/g, "\\'");
+            const downloads = m.hf_downloads ? m.hf_downloads.toLocaleString() : '\u2014';
+            const downloadedOn = m.downloaded_at
+                ? new Date(m.downloaded_at * 1000).toLocaleDateString()
+                : '\u2014';
+            const hfUpdated = m.hf_last_modified
+                ? new Date(m.hf_last_modified).toLocaleDateString()
+                : '\u2014';
+            return '<div class="model-grid-row">' +
+                '<span class="model-name" title="' + m.filename + '">\u{1F4C4} ' + (m.model_name || m.filename) + '</span>' +
+                '<span class="model-cell">' + (m.quant_type || '\u2014') + '</span>' +
+                '<span class="model-cell">' + m.size_display + '</span>' +
+                '<span class="model-cell">' + downloads + '</span>' +
+                '<span class="model-cell">' + downloadedOn + '</span>' +
+                '<span class="model-cell">' + hfUpdated + '</span>' +
+                '<span class="model-delete-cell"><button class="btn-sm btn-preset-delete" onclick="deleteModel(\'' + safeName + '\')">Delete</button></span>' +
+                '</div>';
+        }).join('');
+    } catch (err) {
+        listEl.innerHTML = '<div class="fb-empty">Error: ' + err.message + '</div>';
+    }
+}
+
+async function deleteModel(filename) {
+    const proceed = await showConfirm('Delete Model', 'Delete ' + filename + ' from disk? This cannot be undone.');
+    if (!proceed) return;
+    try {
+        const resp = await fetch('/api/models/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: filename }),
+        });
+        const data = await resp.json();
+        if (!data.ok) {
+            showToast('Delete failed: ' + (data.error || 'unknown'), 'error');
+            return;
+        }
+        showToast('Deleted: ' + filename, 'success');
+        loadModelsTab();
+    } catch (err) {
+        showToast('Delete failed: ' + err.message, 'error');
+    }
+}
+
+function updateHfProgress(p) {
+    const badge = document.getElementById('hf-badge');
+    if (!p) {
+        badge.style.display = 'none';
+        return;
+    }
+    if (p.done) {
+        hfDownloading = false;
+        badge.style.display = 'none';
+        document.getElementById('hf-download-progress').style.display = 'none';
+        document.getElementById('models-hf-banner').style.display = 'none';
+        if (hfLastHandledDone) return;
+        hfLastHandledDone = true;
+        if (p.error) {
+            showToast('Download failed: ' + p.error, 'error');
+        } else {
+            showToast('Downloaded: ' + p.filename, 'success');
+            refreshModels();
+        }
+        return;
+    }
+    if (p.total_bytes > 0) {
+        const pct = ((p.downloaded_bytes / p.total_bytes) * 100).toFixed(1);
+        document.getElementById('hf-progress-pct').textContent = pct + '%';
+        document.getElementById('hf-progress-bar').style.width = pct + '%';
+        badge.style.display = '';
+        badge.textContent = '(' + pct + '%)';
+
+        const banner = document.getElementById('models-hf-banner');
+        banner.style.display = '';
+        document.getElementById('models-hf-banner-name').textContent = 'Downloading: ' + p.filename;
+        document.getElementById('models-hf-banner-pct').textContent = pct + '%';
+        document.getElementById('models-hf-banner-bar').style.width = pct + '%';
+    }
 }
 
 // Close file browser on Escape
@@ -614,6 +869,7 @@ ws.onmessage = e => {
 
     // Server state
     serverRunning = d.server_running;
+    updateHfProgress(d.hf_download);
     const dot = document.getElementById('status-dot');
     const txt = document.getElementById('status-text');
     dot.className = 'status-dot ' + (serverRunning ? 'running' : 'stopped');

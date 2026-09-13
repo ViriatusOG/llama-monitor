@@ -274,6 +274,7 @@ h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
 }
 .fb-path-input:focus { border-color: #88c0d1; }
 .fb-entries { min-height: 200px; max-height: 400px; overflow-y: auto; }
+.fb-header { display: flex; justify-content: space-between; padding: 6px 16px; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.03em; color: #6a7585; border-bottom: 1px solid #3b4252; }
 .fb-entries::-webkit-scrollbar { width: 6px; }
 .fb-entries::-webkit-scrollbar-thumb { background: #4c566a; border-radius: 3px; }
 .fb-entry {
@@ -290,6 +291,30 @@ h2 { font-size: 1.1rem; color: #81a1c1; margin: 16px 0 8px 0; }
 .fb-entry-name { flex: 1; color: #d8dee9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fb-entry-dir .fb-entry-name { color: #ebcb8b; }
 .fb-entry-size { color: #6a7585; font-size: 0.72rem; font-family: monospace; flex-shrink: 0; }
+
+/* Models tab table (grid-based, distinct from the 2-column file browser) */
+.model-grid-header, .model-grid-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr 0.8fr 1fr 1fr 1fr auto;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 16px;
+}
+.model-grid-header {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #6a7585;
+    border-bottom: 1px solid #3b4252;
+}
+.model-grid-row {
+    border-bottom: 1px solid #3b4252;
+    font-size: 0.85rem;
+}
+.model-grid-row:hover { background: #434c5e; }
+.model-grid-row .model-name { color: #d8dee9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+.model-grid-row .model-cell { color: #6a7585; font-size: 0.78rem; font-family: monospace; }
+.model-grid-row .model-delete-cell { justify-self: end; }
 .fb-empty { padding: 16px; color: #6a7585; text-align: center; font-size: 0.82rem; }
 
 /* Toast notifications */
