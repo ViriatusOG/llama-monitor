@@ -112,9 +112,7 @@
                 <div id="models-hf-banner-bar" style="background:#88c0d1; height:100%; width:0%; transition:width 0.3s;"></div>
             </div>
         </div>
-        <div class="model-grid-header">
-            <span>Model</span><span>Quant</span><span>Size</span><span>Fits VRAM?</span><span>Downloads</span><span>Downloaded</span><span>HF Updated</span><span></span>
-        </div>
+        <div class="model-grid-header" id="models-header"></div>
         <div id="models-list" style="max-height:none;"></div>
     </div>
 
@@ -218,6 +216,7 @@
             <button class="btn-sm btn-preset" onclick="fileBrowserUp()" title="Parent directory">&uarr; Up</button>
             <input type="text" id="fb-path-input" class="fb-path-input" onkeydown="if(event.key==='Enter')fileBrowserGo(this.value)">
         </div>
+        <div id="fb-header" class="fb-header"></div>
         <div class="modal-body" style="padding:0;">
             <div id="fb-entries" class="fb-entries"></div>
         </div>

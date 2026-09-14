@@ -217,21 +217,59 @@ async function fileBrowserGo(path) {
             entriesEl.innerHTML = '<div class="fb-empty">Empty directory</div>';
             return;
         }
-        entriesEl.innerHTML = data.entries.map(e => {
-            if (e.is_dir) {
-                return '<div class="fb-entry fb-entry-dir" onclick="fileBrowserGo(\'' + e.path.replace(/'/g, "\\'") + '\')">' +
-                    '<span class="fb-entry-icon">\u{1F4C1}</span>' +
-                    '<span class="fb-entry-name">' + e.name + '</span></div>';
-            } else {
-                return '<div class="fb-entry fb-entry-file fb-match" onclick="fileBrowserSelect(\'' + e.path.replace(/'/g, "\\'") + '\')">' +
-                    '<span class="fb-entry-icon">\u{1F4C4}</span>' +
-                    '<span class="fb-entry-name">' + e.name + '</span>' +
-                    '<span class="fb-entry-size">' + e.size_display + '</span></div>';
-            }
-        }).join('');
+        fbEntries = data.entries;
+        renderFileBrowser();
     } catch (err) {
         entriesEl.innerHTML = '<div class="fb-empty">Error: ' + err.message + '</div>';
     }
+}
+
+let fbEntries = [];
+let fbSortKey = 'name';
+let fbSortDir = 'asc';
+
+function sortFileBrowser(key) {
+    if (fbSortKey === key) {
+        fbSortDir = fbSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        fbSortKey = key;
+        fbSortDir = key === 'size' ? 'desc' : 'asc';
+    }
+    renderFileBrowser();
+}
+
+function renderFileBrowser() {
+    const entriesEl = document.getElementById('fb-entries');
+    const headerEl = document.getElementById('fb-header');
+    if (headerEl) {
+        headerEl.innerHTML =
+            '<span class="sortable" onclick="sortFileBrowser(\'name\')">Name' +
+            sortIndicator(fbSortKey, 'name', fbSortDir) + '</span>' +
+            '<span class="sortable" onclick="sortFileBrowser(\'size\')">Size' +
+            sortIndicator(fbSortKey, 'size', fbSortDir) + '</span>';
+    }
+    if (!fbEntries || fbEntries.length === 0) {
+        entriesEl.innerHTML = '<div class="fb-empty">Empty directory</div>';
+        return;
+    }
+    // Directories always stay above files -- sorting a mixed list by size
+    // would scatter folders through it, which reads as broken.
+    const sorted = fbEntries.slice().sort((x, y) => {
+        if (x.is_dir !== y.is_dir) return x.is_dir ? -1 : 1;
+        return compareValues(x[fbSortKey], y[fbSortKey], fbSortDir);
+    });
+    entriesEl.innerHTML = sorted.map(e => {
+        if (e.is_dir) {
+            return '<div class="fb-entry fb-entry-dir" onclick="fileBrowserGo(\'' + e.path.replace(/'/g, "\\'") + '\')">' +
+                '<span class="fb-entry-icon">\u{1F4C1}</span>' +
+                '<span class="fb-entry-name">' + e.name + '</span></div>';
+        } else {
+            return '<div class="fb-entry fb-entry-file fb-match" onclick="fileBrowserSelect(\'' + e.path.replace(/'/g, "\\'") + '\')">' +
+                '<span class="fb-entry-icon">\u{1F4C4}</span>' +
+                '<span class="fb-entry-name">' + e.name + '</span>' +
+                '<span class="fb-entry-size">' + e.size_display + '</span></div>';
+        }
+    }).join('');
 }
 
 function fileBrowserUp() {
@@ -496,15 +534,49 @@ async function hfSearch() {
             listEl.innerHTML = '<div class="fb-empty">No results</div>';
             return;
         }
-        listEl.innerHTML = data.results.map(r =>
+        hfRepoData = data.results;
+        renderHfRepos();
+    } catch (err) {
+        listEl.innerHTML = '<div class="fb-empty">Error: ' + err.message + '</div>';
+    }
+}
+
+let hfRepoData = [];
+let hfRepoSortKey = 'downloads';
+let hfRepoSortDir = 'desc';
+
+function sortHfRepos(key) {
+    if (hfRepoSortKey === key) {
+        hfRepoSortDir = hfRepoSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        hfRepoSortKey = key;
+        hfRepoSortDir = key === 'downloads' ? 'desc' : 'asc';
+    }
+    renderHfRepos();
+}
+
+function renderHfRepos() {
+    const listEl = document.getElementById('hf-repo-list');
+    const headerEl = document.getElementById('hf-repo-header');
+    if (headerEl) {
+        headerEl.innerHTML =
+            '<span class="sortable" onclick="sortHfRepos(\'id\')">Model' +
+            sortIndicator(hfRepoSortKey, 'id', hfRepoSortDir) + '</span>' +
+            '<span class="sortable" onclick="sortHfRepos(\'downloads\')">Downloads' +
+            sortIndicator(hfRepoSortKey, 'downloads', hfRepoSortDir) + '</span>';
+    }
+    if (!hfRepoData || hfRepoData.length === 0) {
+        listEl.innerHTML = '<div class="fb-empty">No results</div>';
+        return;
+    }
+    const sorted = hfRepoData.slice().sort((x, y) =>
+        compareValues(x[hfRepoSortKey], y[hfRepoSortKey], hfRepoSortDir));
+    listEl.innerHTML = sorted.map(r =>
             '<div class="fb-entry fb-entry-file fb-match" onclick="hfShowFiles(\'' + r.id.replace(/'/g, "\\'") + '\')">' +
             '<span class="fb-entry-icon">\u{1F4E6}</span>' +
             '<span class="fb-entry-name">' + r.id + '</span>' +
             '<span class="fb-entry-size" title="Total downloads">' + r.downloads.toLocaleString() + ' downloads</span></div>'
         ).join('');
-    } catch (err) {
-        listEl.innerHTML = '<div class="fb-empty">Error: ' + err.message + '</div>';
-    }
 }
 
 async function hfShowFiles(repoId) {
@@ -528,17 +600,62 @@ async function hfShowFiles(repoId) {
             fileListEl.innerHTML = '<div class="fb-empty">No .gguf files found</div>';
             return;
         }
-        fileListEl.innerHTML = data.files.map(f => {
-            const fit = vramFitCheck(f.size_bytes);
-            return '<div class="fb-entry fb-entry-file fb-match" onclick="hfDownload(\'' + f.filename.replace(/'/g, "\\'") + '\', \'' + f.size_display + '\')">' +
-                '<span class="fb-entry-icon">\u{1F4C4}</span>' +
-                '<span class="fb-entry-name">' + f.filename + '</span>' +
-                '<span class="fb-entry-size ' + fit.cls + '" title="' + fit.title + '">' + fit.label + '</span>' +
-                '<span class="fb-entry-size">' + f.size_display + '</span></div>';
-        }).join('');
+        hfFileData = data.files;
+        renderHfFiles();
     } catch (err) {
         fileListEl.innerHTML = '<div class="fb-empty">Error: ' + err.message + '</div>';
     }
+}
+
+let hfFileData = [];
+let hfFileSortKey = 'filename';
+let hfFileSortDir = 'asc';
+
+function sortHfFiles(key) {
+    if (hfFileSortKey === key) {
+        hfFileSortDir = hfFileSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        hfFileSortKey = key;
+        hfFileSortDir = key === 'size_bytes' ? 'desc' : 'asc';
+    }
+    renderHfFiles();
+}
+
+function renderHfFiles() {
+    const fileListEl = document.getElementById('hf-file-list');
+    const headerEl = document.getElementById('hf-file-header');
+    if (headerEl) {
+        headerEl.innerHTML =
+            '<span class="sortable" onclick="sortHfFiles(\'filename\')">File (click to download)' +
+            sortIndicator(hfFileSortKey, 'filename', hfFileSortDir) + '</span>' +
+            '<span class="sortable" onclick="sortHfFiles(\'fits_vram\')">Fits VRAM?' +
+            sortIndicator(hfFileSortKey, 'fits_vram', hfFileSortDir) + '</span>' +
+            '<span class="sortable" onclick="sortHfFiles(\'size_bytes\')">Size' +
+            sortIndicator(hfFileSortKey, 'size_bytes', hfFileSortDir) + '</span>';
+    }
+    if (!hfFileData || hfFileData.length === 0) {
+        fileListEl.innerHTML = '<div class="fb-empty">No .gguf files found</div>';
+        return;
+    }
+    const sorted = hfFileData.slice().sort((x, y) => {
+        let a, b;
+        if (hfFileSortKey === 'fits_vram') {
+            a = vramFitCheck(x.size_bytes).cls === 'vram-fit-ok';
+            b = vramFitCheck(y.size_bytes).cls === 'vram-fit-ok';
+        } else {
+            a = x[hfFileSortKey];
+            b = y[hfFileSortKey];
+        }
+        return compareValues(a, b, hfFileSortDir);
+    });
+    fileListEl.innerHTML = sorted.map(f => {
+        const fit = vramFitCheck(f.size_bytes);
+        return '<div class="fb-entry fb-entry-file fb-match" onclick="hfDownload(\'' + f.filename.replace(/'/g, "\\'") + '\', \'' + f.size_display + '\')">' +
+            '<span class="fb-entry-icon">\u{1F4C4}</span>' +
+            '<span class="fb-entry-name">' + f.filename + '</span>' +
+            '<span class="fb-entry-size ' + fit.cls + '" title="' + fit.title + '">' + fit.label + '</span>' +
+            '<span class="fb-entry-size">' + f.size_display + '</span></div>';
+    }).join('');
 }
 
 async function hfDownload(filename, sizeDisplay) {
@@ -716,19 +833,95 @@ function renderVramBar(d) {
     setLegends(legendItems.join(''));
 }
 
-async function loadModelsTab() {
+// --- Sorting ---
+
+// Compares two values for sorting. Nulls always sort last regardless of
+// direction, so rows with missing data don't crowd the top.
+function compareValues(a, b, dir) {
+    const aMissing = a === null || a === undefined || a === '';
+    const bMissing = b === null || b === undefined || b === '';
+    if (aMissing && bMissing) return 0;
+    if (aMissing) return 1;
+    if (bMissing) return -1;
+    let result;
+    if (typeof a === 'number' && typeof b === 'number') {
+        result = a - b;
+    } else if (typeof a === 'boolean' && typeof b === 'boolean') {
+        result = (a === b) ? 0 : (a ? -1 : 1);
+    } else {
+        result = String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
+    }
+    return dir === 'desc' ? -result : result;
+}
+
+function sortIndicator(activeKey, key, dir) {
+    if (activeKey !== key) return '';
+    return dir === 'asc' ? ' \u25b2' : ' \u25bc';
+}
+
+// --- Models tab ---
+
+let modelsData = [];
+let modelsSortKey = 'model_name';
+let modelsSortDir = 'asc';
+
+function sortModels(key) {
+    if (modelsSortKey === key) {
+        modelsSortDir = modelsSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        modelsSortKey = key;
+        // Sizes, counts and dates are most useful largest/newest first.
+        modelsSortDir = ['size_bytes', 'hf_downloads', 'downloaded_at', 'hf_last_modified'].includes(key) ? 'desc' : 'asc';
+    }
+    renderModelsTab();
+}
+
+function renderModelsHeader() {
+    const headerEl = document.getElementById('models-header');
+    if (!headerEl) return;
+    const cols = [
+        ['model_name', 'Model'],
+        ['quant_type', 'Quant'],
+        ['size_bytes', 'Size'],
+        ['fits_vram', 'Fits VRAM?'],
+        ['hf_downloads', 'Downloads'],
+        ['downloaded_at', 'Downloaded'],
+        ['hf_last_modified', 'HF Updated'],
+    ];
+    headerEl.innerHTML = cols.map(([key, label]) =>
+        '<span class="sortable" onclick="sortModels(\'' + key + '\')">' +
+        label + sortIndicator(modelsSortKey, key, modelsSortDir) + '</span>'
+    ).join('') + '<span></span>';
+}
+
+function renderModelsTab() {
     const listEl = document.getElementById('models-list');
-    listEl.innerHTML = '<div class="fb-empty">Loading...</div>';
-    try {
-        await fetch('/api/models/refresh', { method: 'POST' });
-        const resp = await fetch('/api/models');
-        const models = await resp.json();
-        document.getElementById('badge-models').textContent = models.length || '';
-        if (!models || models.length === 0) {
-            listEl.innerHTML = '<div class="fb-empty">No models found. Download one to get started.</div>';
-            return;
+    renderModelsHeader();
+
+    if (!modelsData || modelsData.length === 0) {
+        listEl.innerHTML = '<div class="fb-empty">No models found. Download one to get started.</div>';
+        return;
+    }
+
+    const sorted = modelsData.slice().sort((x, y) => {
+        let a, b;
+        if (modelsSortKey === 'fits_vram') {
+            a = vramFitCheck(x.size_bytes).cls === 'vram-fit-ok';
+            b = vramFitCheck(y.size_bytes).cls === 'vram-fit-ok';
+        } else if (modelsSortKey === 'model_name') {
+            a = x.model_name || x.filename;
+            b = y.model_name || y.filename;
+        } else if (modelsSortKey === 'hf_last_modified') {
+            a = x.hf_last_modified ? Date.parse(x.hf_last_modified) : null;
+            b = y.hf_last_modified ? Date.parse(y.hf_last_modified) : null;
+        } else {
+            a = x[modelsSortKey];
+            b = y[modelsSortKey];
         }
-        listEl.innerHTML = models.map(m => {
+        return compareValues(a, b, modelsSortDir);
+    });
+
+    listEl.innerHTML = sorted.map(m => {
             const safeName = m.filename.replace(/'/g, "\\'");
             const downloads = m.hf_downloads ? m.hf_downloads.toLocaleString() : '\u2014';
             const downloadedOn = m.downloaded_at
@@ -749,6 +942,17 @@ async function loadModelsTab() {
                 '<span class="model-delete-cell"><button class="btn-sm btn-preset-delete" onclick="deleteModel(\'' + safeName + '\')">Delete</button></span>' +
                 '</div>';
         }).join('');
+}
+
+async function loadModelsTab() {
+    const listEl = document.getElementById('models-list');
+    listEl.innerHTML = '<div class="fb-empty">Loading...</div>';
+    try {
+        await fetch('/api/models/refresh', { method: 'POST' });
+        const resp = await fetch('/api/models');
+        modelsData = await resp.json();
+        document.getElementById('badge-models').textContent = modelsData.length || '';
+        renderModelsTab();
     } catch (err) {
         listEl.innerHTML = '<div class="fb-empty">Error: ' + err.message + '</div>';
     }
