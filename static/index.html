@@ -369,6 +369,12 @@
                 <label class="modal-field" title="VRAM distribution ratio across GPUs (e.g. '7,8,8,8' for 4 GPUs). Leave empty for single GPU.">Tensor Split (-ts)
                     <input type="text" id="modal-tensor-split" placeholder="7/8/8/8">
                 </label>
+                <label class="modal-field" title="Vulkan runs across all GPUs. CUDA is NVIDIA-only but noticeably faster -- use it for models that fit on the NVIDIA card alone.">Backend
+                    <select id="modal-backend" onchange="onBackendChange()">
+                        <option value="vulkan">Vulkan (all GPUs)</option>
+                        <option value="cuda">CUDA (NVIDIA only)</option>
+                    </select>
+                </label>
                 <div class="modal-row">
                     <label class="modal-field" title="How to split the model across GPUs: layer (default, split by layer) or row (split large tensors).">Split Mode
                         <select id="modal-split-mode">

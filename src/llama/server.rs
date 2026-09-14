@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command as TokioCommand;
 
@@ -28,6 +29,8 @@ pub struct ServerConfig {
     #[serde(default)]
     pub flash_attn: String,
     // GPU distribution
+    #[serde(default)]
+    pub backend: String,
     #[serde(default)]
     pub split_mode: String,
     #[serde(default)]
@@ -90,13 +93,38 @@ pub async fn start_server(
         logs.clear();
     }
 
-    let mut cmd = TokioCommand::new(&app_config.llama_server_path);
+    // A CUDA preset runs a separate llama.cpp build. By convention the
+    // CUDA binaries live in a sibling "build-cuda" directory next to the
+    // default "build" one, since llama.cpp can only target one GPU
+    // backend per build.
+    let use_cuda = config.backend == "cuda";
+    let binary_path = if use_cuda {
+        let s = app_config.llama_server_path.display().to_string();
+        let swapped = s.replace("/build/bin/", "/build-cuda/bin/");
+        let p = PathBuf::from(&swapped);
+        if !p.exists() {
+            anyhow::bail!(
+                "CUDA build not found at {}. Build it with: cmake -B build-cuda -DGGML_CUDA=ON && cmake --build build-cuda --config Release",
+                p.display()
+            );
+        }
+        p
+    } else {
+        app_config.llama_server_path.clone()
+    };
+
+    let mut cmd = TokioCommand::new(&binary_path);
     cmd.current_dir(&app_config.llama_server_cwd);
 
     // Set GPU-specific environment variables
     let gpu_env = state.gpu_env.lock().unwrap().clone();
     let cwd = app_config.llama_server_cwd.display().to_string();
-    match app_config.gpu_backend.as_str() {
+    let effective_backend = if use_cuda {
+        "nvidia"
+    } else {
+        app_config.gpu_backend.as_str()
+    };
+    match effective_backend {
         "nvidia" => {
             for (key, val) in build_nvidia_env(&gpu_env) {
                 cmd.env(key, val);
@@ -139,8 +167,9 @@ pub async fn start_server(
         cmd.arg("-fa").arg(&config.flash_attn);
     }
 
-    // GPU distribution
-    if !config.tensor_split.is_empty() {
+    // GPU distribution -- a CUDA build only ever sees the NVIDIA card,
+    // so a split would be meaningless and is deliberately not passed.
+    if !use_cuda && !config.tensor_split.is_empty() {
         cmd.arg("-ts").arg(&config.tensor_split);
     }
     if !config.split_mode.is_empty() {

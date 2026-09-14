@@ -248,6 +248,13 @@ function fileBrowserSelect(path) {
     closeFileBrowser();
 }
 
+function onBackendChange() {
+    const isCuda = document.getElementById('modal-backend').value === 'cuda';
+    const ts = document.getElementById('modal-tensor-split');
+    ts.disabled = isCuda;
+    ts.title = isCuda ? 'Not used -- a CUDA build only sees the NVIDIA GPU' : '';
+}
+
 // --- Optimize / Benchmark ---
 
 let benchRunning = false;
@@ -872,6 +879,7 @@ function openPresetModal(mode) {
         setVal('modal-parallel-slots', p.parallel_slots || 1);
         // GPU
         setVal('modal-tensor-split', p.tensor_split);
+        setVal('modal-backend', p.backend || 'vulkan');
         setOpt('modal-split-mode', p.split_mode);
         numOrEmpty('modal-main-gpu', p.main_gpu);
         // Threading
@@ -954,6 +962,7 @@ async function savePreset(event) {
         parallel_slots: parseInt(document.getElementById('modal-parallel-slots').value) || 1,
         // GPU
         tensor_split: strVal('modal-tensor-split'),
+        backend: strVal('modal-backend') || 'vulkan',
         split_mode: strVal('modal-split-mode'),
         main_gpu: intOrNull('modal-main-gpu'),
         // Threading
